@@ -4,3 +4,4 @@ obj/
 .vs/
 *.slnx.DotSettings.user
 src/SafetyVision.Server/models/*.onnx
+server_run.log
