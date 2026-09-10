@@ -3,3 +3,4 @@ obj/
 *.user
 .vs/
 *.slnx.DotSettings.user
+src/SafetyVision.Server/models/*.onnx
