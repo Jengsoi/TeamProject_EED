@@ -31,6 +31,13 @@ public static class FrameAnalyzer
         return new FrameEvaluation(PersonRoiCondition.Qualified, votes);
     }
 
+    // ROI에 정확히 1명(대상)이 있을 때 그 Person 박스를 반환한다. 대표 이미지의 Person confidence 기록 등에 사용.
+    public static DetectedBox? FindSingleRoiPerson(IReadOnlyList<DetectedBox> boxes, int frameWidth, int frameHeight, SafetyVisionOptions options)
+    {
+        var inRoi = boxes.Where(b => b.Class == DetectedClass.Person && RoiEvaluator.IsCenterInRoi(b, frameWidth, frameHeight, options)).ToList();
+        return inRoi.Count == 1 ? inRoi[0] : null;
+    }
+
     private static IReadOnlyDictionary<EquipmentCode, FrameVote> EvaluateVotes(
         DetectedBox target,
         IReadOnlyList<DetectedBox> allPersons,
