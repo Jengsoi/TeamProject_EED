@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SafetyVision.Client/SafetyVision.Client.csproj" />
+    <Project Path="src/SafetyVision.Core/SafetyVision.Core.csproj" />
+    <Project Path="src/SafetyVision.Data/SafetyVision.Data.csproj" />
+    <Project Path="src/SafetyVision.Protocol/SafetyVision.Protocol.csproj" />
+    <Project Path="src/SafetyVision.Server/SafetyVision.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SafetyVision.Tests/SafetyVision.Tests.csproj" />
+  </Folder>
+</Solution>
