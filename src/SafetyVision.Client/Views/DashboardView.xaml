@@ -1,0 +1,89 @@
+<UserControl x:Class="SafetyVision.Client.Views.DashboardView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:lvc="clr-namespace:LiveChartsCore.SkiaSharpView.WPF;assembly=LiveChartsCore.SkiaSharpView.WPF">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Text="관리자 대시보드" FontSize="20" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,16"/>
+
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="전체 검사" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13"/>
+                        <TextBlock Text="{Binding Total}" FontSize="30" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}"/>
+                        <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0">
+                            <Run Text="미확인 "/><Run Text="{Binding Unconfirmed, Mode=OneWay}"/><Run Text="건"/>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="정상" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13"/>
+                        <TextBlock Text="{Binding Normal}" FontSize="30" FontWeight="Bold" Foreground="{StaticResource WornBrush}"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="4" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="점검 필요" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13"/>
+                        <TextBlock Text="{Binding CheckRequired}" FontSize="30" FontWeight="Bold" Foreground="{StaticResource NotWornBrush}"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid Margin="0,0,0,16" Visibility="{Binding IsEmpty, Converter={StaticResource InverseBooleanConverter}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="장비별 현황" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                        <lvc:CartesianChart Series="{Binding BarSeries}" XAxes="{Binding BarXAxes}" Height="220"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="검사 결과 비율" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                        <lvc:PieChart Series="{Binding PieSeries}" Height="220" LegendPosition="Right"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Border Style="{StaticResource CardStyle}" Visibility="{Binding IsEmpty, Converter={StaticResource BooleanToVisibilityConverter}}" Margin="0,0,0,16">
+                <TextBlock Text="검사 기록이 없습니다." Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" Margin="20"/>
+            </Border>
+
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel>
+                    <TextBlock Text="최근 검사" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <DataGrid ItemsSource="{Binding Recent}" AutoGenerateColumns="False" IsReadOnly="True"
+                              HeadersVisibility="Column" GridLinesVisibility="Horizontal" RowHeight="34"
+                              BorderThickness="0" Background="Transparent">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="No" Binding="{Binding Id}" Width="60"/>
+                            <DataGridTextColumn Header="시각" Binding="{Binding InspectedAtUtc, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}'}" Width="160"/>
+                            <DataGridTextColumn Header="카메라" Binding="{Binding Camera}" Width="80"/>
+                            <DataGridTextColumn Header="안전모" Binding="{Binding Hardhat, Converter={StaticResource StatusToTextConverter}}" Width="80"/>
+                            <DataGridTextColumn Header="안전조끼" Binding="{Binding Vest, Converter={StaticResource StatusToTextConverter}}" Width="80"/>
+                            <DataGridTextColumn Header="마스크" Binding="{Binding Mask, Converter={StaticResource StatusToTextConverter}}" Width="80"/>
+                            <DataGridTextColumn Header="결과" Binding="{Binding Result, Converter={StaticResource StatusToTextConverter}}" Width="90"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

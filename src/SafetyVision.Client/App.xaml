@@ -1,9 +1,110 @@
-﻿<Application x:Class="SafetyVision.Client.App"
+<Application x:Class="SafetyVision.Client.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:SafetyVision.Client"
-             StartupUri="MainWindow.xaml">
+             xmlns:conv="clr-namespace:SafetyVision.Client.Converters">
     <Application.Resources>
-         
+        <ResourceDictionary>
+
+            <SolidColorBrush x:Key="NavyBrush" Color="#0F1B2D"/>
+            <SolidColorBrush x:Key="NavyLightBrush" Color="#1B2C46"/>
+            <SolidColorBrush x:Key="AccentBrush" Color="#2563EB"/>
+            <SolidColorBrush x:Key="AccentDarkBrush" Color="#1D4ED8"/>
+            <SolidColorBrush x:Key="PageBackgroundBrush" Color="#F3F4F6"/>
+            <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF"/>
+            <SolidColorBrush x:Key="BorderBrush2" Color="#E5E7EB"/>
+            <SolidColorBrush x:Key="TextPrimaryBrush" Color="#111827"/>
+            <SolidColorBrush x:Key="TextSecondaryBrush" Color="#6B7280"/>
+            <SolidColorBrush x:Key="WornBrush" Color="#16A34A"/>
+            <SolidColorBrush x:Key="NotWornBrush" Color="#F58B1F"/>
+            <SolidColorBrush x:Key="UnknownBrush" Color="#9CA3AF"/>
+            <SolidColorBrush x:Key="DangerBrush" Color="#DC2626"/>
+
+            <conv:StatusToBrushConverter x:Key="StatusToBrushConverter"/>
+            <conv:StatusToTextConverter x:Key="StatusToTextConverter"/>
+            <conv:ScoreToPercentTextConverter x:Key="ScoreToPercentTextConverter"/>
+            <conv:RatioToPercentTextConverter x:Key="RatioToPercentTextConverter"/>
+            <conv:RatioToPercentValueConverter x:Key="RatioToPercentValueConverter"/>
+            <conv:StringEqualsToVisibilityConverter x:Key="StringEqualsToVisibilityConverter"/>
+            <conv:StringNotEqualsToVisibilityConverter x:Key="StringNotEqualsToVisibilityConverter"/>
+            <conv:NullToVisibilityConverter x:Key="NullToVisibilityConverter"/>
+            <conv:InverseBooleanConverter x:Key="InverseBooleanConverter"/>
+            <conv:RatioToStarGridLengthConverter x:Key="RatioToStarGridLengthConverter"/>
+            <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+
+            <Style x:Key="CardStyle" TargetType="Border">
+                <Setter Property="Background" Value="{StaticResource CardBrush}"/>
+                <Setter Property="CornerRadius" Value="10"/>
+                <Setter Property="Padding" Value="16"/>
+                <Setter Property="BorderBrush" Value="{StaticResource BorderBrush2}"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="Effect">
+                    <Setter.Value>
+                        <DropShadowEffect Color="#000000" Opacity="0.06" BlurRadius="12" ShadowDepth="2"/>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="PrimaryButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Padding" Value="16,10"/>
+                <Setter Property="BorderThickness" Value="0"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+                <Style.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="Background" Value="{StaticResource AccentDarkBrush}"/>
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Background" Value="{StaticResource UnknownBrush}"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style x:Key="SecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+                <Setter Property="Background" Value="#E5E7EB"/>
+                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                <Style.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="Background" Value="#D1D5DB"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style x:Key="SidebarButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="Foreground" Value="#CBD5E1"/>
+                <Setter Property="HorizontalContentAlignment" Value="Left"/>
+                <Setter Property="Padding" Value="16,12"/>
+                <Setter Property="BorderThickness" Value="0"/>
+                <Setter Property="FontSize" Value="14"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="6">
+                                <ContentPresenter Margin="{TemplateBinding Padding}"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bg" Property="Background" Value="{StaticResource NavyLightBrush}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

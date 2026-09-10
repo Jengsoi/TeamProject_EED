@@ -1,0 +1,60 @@
+<Window x:Class="SafetyVision.Client.Views.ShellWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:SafetyVision.Client.ViewModels"
+        xmlns:views="clr-namespace:SafetyVision.Client.Views"
+        Title="SAFETY VISION" Height="820" Width="1360" MinWidth="1080" MinHeight="680"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource PageBackgroundBrush}">
+
+    <Window.Resources>
+        <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
+            <views:DashboardView/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SiteInspectionViewModel}">
+            <views:SiteInspectionView/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:HistoryViewModel}">
+            <views:HistoryView/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:PlaceholderViewModel}">
+            <views:PlaceholderView/>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="{StaticResource NavyBrush}">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Top" Margin="16,20,16,24" Orientation="Horizontal">
+                    <TextBlock Text="🛡" FontSize="20" Foreground="{StaticResource AccentBrush}" Margin="0,0,8,0"/>
+                    <TextBlock Text="SAFETY VISION" FontSize="15" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <Border DockPanel.Dock="Bottom" Margin="12,0,12,16" BorderBrush="#334155" BorderThickness="0,1,0,0" Padding="4,12,4,0">
+                    <StackPanel>
+                        <TextBlock Text="{Binding AdminDisplayName}" Foreground="#CBD5E1" FontSize="13" Margin="8,0,0,8"/>
+                        <Button Content="로그아웃" Style="{StaticResource SidebarButtonStyle}" Command="{Binding LogoutCommand}"/>
+                    </StackPanel>
+                </Border>
+
+                <StackPanel Margin="8,0">
+                    <Button Content="대시보드" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigateDashboardCommand}"/>
+                    <Button Content="현장 검사" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigateSiteInspectionCommand}"/>
+                    <Button Content="검사 이력" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigateHistoryCommand}"/>
+                    <Button Content="통계 분석" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigatePlaceholderCommand}" CommandParameter="통계 분석"/>
+                    <Button Content="카메라 관리" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigatePlaceholderCommand}" CommandParameter="카메라 관리"/>
+                    <Button Content="장비 관리" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigatePlaceholderCommand}" CommandParameter="장비 관리"/>
+                    <Button Content="사용자 관리" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigatePlaceholderCommand}" CommandParameter="사용자 관리"/>
+                    <Button Content="시스템 설정" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigatePlaceholderCommand}" CommandParameter="시스템 설정"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <ContentControl Grid.Column="1" Content="{Binding CurrentViewModel}" Margin="24"/>
+    </Grid>
+</Window>
