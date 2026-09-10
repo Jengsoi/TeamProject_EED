@@ -20,6 +20,9 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly HistoryViewModel _historyVm;
 
     public event Action? LoggedOut;
+    public event Action? ConnectionLost;
+
+    private bool _intentionalDisconnect;
 
     public ShellViewModel(ServerConnection connection, string adminDisplayName)
     {
@@ -31,8 +34,19 @@ public sealed partial class ShellViewModel : ObservableObject
         _siteInspectionVm.ReturnToDashboardRequested += () => NavigateDashboardCommand.Execute(null);
         _historyVm = new HistoryViewModel(connection);
 
+        Connection.Disconnected += OnConnectionDisconnected;
+
         CurrentViewModel = _dashboardVm;
         _ = _dashboardVm.LoadAsync();
+    }
+
+    // 07_통신프로토콜.md §6: 연결 실패 시 안내 후 재연결(여기서는 재로그인)을 유도한다.
+    // 로그아웃으로 인한 의도적 연결 종료와, 현장 검사 화면 자체의 재연결 흐름(SCR-04 안내문구·자체 재시도)은 제외한다.
+    private void OnConnectionDisconnected()
+    {
+        if (_intentionalDisconnect) return;
+        if (ReferenceEquals(CurrentViewModel, _siteInspectionVm)) return;
+        System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => ConnectionLost?.Invoke());
     }
 
     [RelayCommand]
@@ -73,6 +87,7 @@ public sealed partial class ShellViewModel : ObservableObject
     private async Task LogoutAsync()
     {
         await LeaveSiteInspectionIfNeededAsync();
+        _intentionalDisconnect = true;
         try { await Connection.RequestAsync(MessageTypes.LogoutRequest, new LogoutRequestPayload(), TimeSpan.FromSeconds(3)); }
         catch (Exception) { /* 연결이 이미 끊겼으면 그냥 로그아웃 처리한다 */ }
         Connection.Dispose();

@@ -11,11 +11,21 @@ public partial class ShellWindow : Window
         InitializeComponent();
         var vm = new ShellViewModel(connection, displayName);
         vm.LoggedOut += OnLoggedOut;
+        vm.ConnectionLost += OnConnectionLost;
         DataContext = vm;
     }
 
     private void OnLoggedOut()
     {
+        var login = new LoginWindow();
+        login.Show();
+        Close();
+    }
+
+    private void OnConnectionLost()
+    {
+        MessageBox.Show(this, "서버 연결이 끊겼습니다. 연결을 확인한 뒤 다시 로그인해 주세요.",
+            "연결 끊김", MessageBoxButton.OK, MessageBoxImage.Warning);
         var login = new LoginWindow();
         login.Show();
         Close();
