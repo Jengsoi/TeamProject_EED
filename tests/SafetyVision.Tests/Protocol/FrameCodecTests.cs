@@ -38,6 +38,45 @@ public class FrameCodecTests
     }
 
     [Fact]
+    public async Task ReadAsync_OversizedPayloadLength_ThrowsInvalidData()
+    {
+        using var stream = new MemoryStream();
+        var header = new byte[5];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header.AsSpan(0, 4), FrameCodec.MaxPayloadBytes + 1);
+        header[4] = (byte)ProtocolMessageType.Json;
+        await stream.WriteAsync(header);
+        stream.Position = 0;
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => FrameCodec.ReadAsync(stream));
+    }
+
+    [Fact]
+    public async Task ReadAsync_NegativePayloadLength_ThrowsInvalidData()
+    {
+        using var stream = new MemoryStream();
+        var header = new byte[5];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header.AsSpan(0, 4), -1);
+        header[4] = (byte)ProtocolMessageType.Json;
+        await stream.WriteAsync(header);
+        stream.Position = 0;
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => FrameCodec.ReadAsync(stream));
+    }
+
+    [Fact]
+    public async Task WriteThenRead_ZeroLengthPayload_RoundTrips()
+    {
+        using var stream = new MemoryStream();
+        await FrameCodec.WriteAsync(stream, ProtocolMessageType.Json, Array.Empty<byte>());
+        stream.Position = 0;
+
+        var (type, payload) = await FrameCodec.ReadAsync(stream);
+
+        Assert.Equal(ProtocolMessageType.Json, type);
+        Assert.Empty(payload);
+    }
+
+    [Fact]
     public async Task ReadAsync_TruncatedStream_ThrowsEndOfStream()
     {
         using var stream = new MemoryStream();

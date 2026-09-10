@@ -80,16 +80,52 @@ dotnet run --project src/SafetyVision.Client
 | MaxInferenceFps | 6 | 초기값, 미검증 |
 | DecisionRatio | 0.70 | 문서 고정값 |
 
-## 7. Day1 검증 결과 요약
+## 7. 테스트 실행
+
+```powershell
+dotnet test tests/SafetyVision.Tests
+```
+
+Core/Protocol 순수 로직 테스트는 별도 설정 없이 바로 실행된다.
+`SafetyVision.Tests/Data/` 아래 DB 통합 테스트(저장 중복 방지, 통계 집계)는 **실제 MySQL이 필요**하며, 데모 DB(`safetyvision`)를 더럽히지 않도록 별도 테스트 DB를 쓴다:
+
+```powershell
+# 최초 1회
+mysql -u root -e "CREATE DATABASE IF NOT EXISTS safetyvision_test CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; GRANT ALL PRIVILEGES ON safetyvision_test.* TO 'safetyvision_app'@'localhost';"
+$env:SAFETYVISION_MYSQL_CONNSTR = "Server=localhost;Port=3306;Database=safetyvision_test;User=safetyvision_app;Password=<비밀번호>;"
+dotnet ef database update --project src/SafetyVision.Data --startup-project src/SafetyVision.Data
+
+# 테스트 실행 시
+$env:SAFETYVISION_TEST_MYSQL_CONNSTR = "Server=localhost;Port=3306;Database=safetyvision_test;User=safetyvision_app;Password=<비밀번호>;"
+dotnet test tests/SafetyVision.Tests
+```
+
+환경변수가 없으면 DB 통합 테스트만 명확한 안내 메시지와 함께 실패하고(순수 로직 테스트는 영향 없음), 해당 클래스들은 `[Collection("MySqlIntegration", DisableParallelization = true)]`로 묶어 같은 테이블을 공유하는 테스트끼리 병렬 실행으로 간섭하지 않게 했다.
+
+## 8. Day1~6 검증 결과 요약
 
 - `dotnet build` (Client/Server/Core/Protocol/Data) 전체 0 오류.
-- xUnit 35개 테스트 통과 (판정 로직 7개 예제, 상태 머신 시나리오, ROI/PPE 연결, TCP 프레이밍, PBKDF2).
+- xUnit 44개 테스트 통과: 판정 로직 7개 예제, 상태 머신 시나리오, ROI/PPE 연결(모호한 PPE 제외 포함), TCP 프레이밍(정상/분할 전송/경계값 초과/음수 길이/빈 페이로드), PBKDF2, **DB 통합(동일 InspectionKey 재시도 중복 방지, 항목 정확히 3개, 통계 분모에 NOT_WORN/UNKNOWN 포함, 0건 처리, 최근 10건 정렬)**.
 - 실제 ONNX 모델 로드 및 metadata 검증 성공.
 - 실제 MySQL 연결, 마이그레이션 적용, admin Seed 확인.
 - 실제 TCP 클라이언트로 로그인 실패/성공, 대시보드 조회 End-to-End 확인.
+- WPF 클라이언트(로그인/대시보드/현장검사/결과/이력) 구현 완료, 전체 솔루션 빌드 확인. 연결 끊김 시 대시보드/이력 화면은 로그인 화면으로 복귀 안내, 현장 검사 화면은 자체 재연결(최대 5회) 후 실패 시 안내.
 
-## 8. 알려진 한계 (아직 실행 검증 필요)
+## 10. Day6 예외·경계 시나리오 실행 검증
 
-- 실제 웹캠을 통한 검출 품질, 발표 PC 추론 속도, 클라이언트→서버 프레임 전송 지연은 실물 웹캠 환경에서 확인 필요.
-- 다중 클라이언트 동시 접속 부하 테스트 미실시.
+실제 서버 프로세스를 띄우고 raw TCP 클라이언트로 아래 시나리오를 직접 재현해 확인했다(스크립트는 재현 목적의 임시 코드이며 저장소에는 포함하지 않음):
+
+| 시나리오 | 결과 |
+|---|---|
+| 클라이언트 5개 동시 접속 후 동시 로그인 | 5/5 성공, 세션 간 간섭 없음 |
+| TCP 비정상 종료(RST)로 세션 끊긴 뒤 신규 접속 | 서버 프로세스 생존, 새 연결 정상 로그인 성공 (세션 정리 확인) |
+| 같은 연결에서 로그인 실패 2회 후 성공 | 연결이 끊기지 않고 유지됨(치명적 오류가 아닌 요청 오류는 연결 유지) |
+| 모델 파일 제거 후 기동 → FrameMeta 전송 | 서버는 정상 기동(DB/TCP는 살아있음)하고, 검사 요청에는 `ErrorNotification(MODEL_UNAVAILABLE)` 응답, 크래시 없음 |
+| MySQL 중지 후 서버 기동 → 클라이언트 접속 | TCP 연결 자체는 수립되나 서버가 즉시 종료(신규 클라이언트 거부), 클라이언트는 쓰기 시점에 연결 끊김 예외로 확인 |
+
+## 11. 알려진 한계 (아직 실행 검증 필요)
+
+- 실제 웹캠을 통한 검출 품질, 발표 PC 추론 속도, 클라이언트→서버 프레임 전송 지연은 실물 웹캠 환경에서 확인 필요(이 개발 환경은 대화형 데스크톱 세션이 없어 WPF 창을 띄워 육안 확인 불가).
+- 다중 클라이언트 동시 접속은 TCP 세션 격리 수준까지 확인했으나(§10), 실제 웹캠 2대 이상 동시 시연은 미실시.
 - MySQL Windows 서비스 등록은 발표 PC에서 관리자 권한으로 별도 진행 필요.
+- 저장 실패(파일시스템 오류 등) 경로는 코드 레벨 리뷰와 재시도 중복 방지 테스트로만 확인했고, 실제 장애 주입 시연은 하지 않음.
