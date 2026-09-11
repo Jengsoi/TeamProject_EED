@@ -11,6 +11,11 @@ public sealed class SafetyVisionOptions
     public string ModelVersion { get; set; } = "v2";
     public bool UseFakeDetection { get; set; } = false;
 
+    // 임시 조치: 지정된 모델의 Person 클래스가 실제로는 검출되지 않는 것으로 확인되어(raw score ~0.0001),
+    // true이면 PPE 박스 묶음으로 사람 위치를 추정한다(PersonProxyEstimator). 05_AI모델명세.md 스펙 이탈이며,
+    // Person 검출이 가능한 모델을 구하면 false로 되돌린다. 실행 README에 근거를 기록해둔다.
+    public bool UsePpeAsPersonProxy { get; set; } = false;
+
     public double DetectionConfidence { get; set; } = 0.40;
     public double NmsIouThreshold { get; set; } = 0.45;
 

@@ -6,7 +6,7 @@ info: Microsoft.EntityFrameworkCore.Database.Command[20101]
       Executed DbCommand (6ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
       SELECT GET_LOCK('__safetyvision_EFMigrationsLock', 259200)
 info: Microsoft.EntityFrameworkCore.Database.Command[20101]
-      Executed DbCommand (4ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      Executed DbCommand (3ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
       CREATE TABLE IF NOT EXISTS `__EFMigrationsHistory` (
           `MigrationId` varchar(150) CHARACTER SET utf8mb4 NOT NULL,
           `ProductVersion` varchar(32) CHARACTER SET utf8mb4 NOT NULL,

@@ -13,7 +13,7 @@ public static class FrameAnalyzer
         int frameHeight,
         SafetyVisionOptions options)
     {
-        var persons = boxes.Where(b => b.Class == DetectedClass.Person).ToList();
+        var persons = GetPersonCandidates(boxes, frameHeight, options);
         var inRoiIndexes = new List<int>();
         for (int i = 0; i < persons.Count; i++)
         {
@@ -34,9 +34,15 @@ public static class FrameAnalyzer
     // ROI에 정확히 1명(대상)이 있을 때 그 Person 박스를 반환한다. 대표 이미지의 Person confidence 기록 등에 사용.
     public static DetectedBox? FindSingleRoiPerson(IReadOnlyList<DetectedBox> boxes, int frameWidth, int frameHeight, SafetyVisionOptions options)
     {
-        var inRoi = boxes.Where(b => b.Class == DetectedClass.Person && RoiEvaluator.IsCenterInRoi(b, frameWidth, frameHeight, options)).ToList();
+        var persons = GetPersonCandidates(boxes, frameHeight, options);
+        var inRoi = persons.Where(b => RoiEvaluator.IsCenterInRoi(b, frameWidth, frameHeight, options)).ToList();
         return inRoi.Count == 1 ? inRoi[0] : null;
     }
+
+    private static IReadOnlyList<DetectedBox> GetPersonCandidates(IReadOnlyList<DetectedBox> boxes, int frameHeight, SafetyVisionOptions options) =>
+        options.UsePpeAsPersonProxy
+            ? PersonProxyEstimator.EstimatePersons(boxes, frameHeight)
+            : boxes.Where(b => b.Class == DetectedClass.Person).ToList();
 
     private static IReadOnlyDictionary<EquipmentCode, FrameVote> EvaluateVotes(
         DetectedBox target,
