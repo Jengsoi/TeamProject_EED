@@ -118,22 +118,18 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
             float w = output[0, 2, i];
             float h = output[0, 3, i];
 
-            int bestClass = -1;
-            float bestScore = 0f;
+            // 임시 조치: 격자칸(anchor)마다 최고 점수 클래스 1개만 채택하면, 안전모 점수가 마스크 점수보다
+            // 높을 때 마스크가 통째로 묻히는 현상이 실측에서 확인됐다(안전모+마스크 동시 착용 시 마스크 미검출).
+            // YOLO의 클래스 점수는 시그모이드라 클래스 간 배타적이지 않으므로, 임계값을 넘는 클래스는
+            // 여러 개라도 전부 후보로 채택한다(같은 anchor에서 다중 클래스 검출 허용).
             for (int c = 0; c < numClasses; c++)
             {
                 float score = output[0, 4 + c, i];
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    bestClass = c;
-                }
+                if (score < _options.DetectionConfidence) continue;
+                if (!_classMap.TryGetValue(c, out var detectedClass)) continue;
+
+                raw.Add(new RawDetection(detectedClass, score, cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2));
             }
-
-            if (bestClass < 0 || bestScore < _options.DetectionConfidence) continue;
-            if (!_classMap.TryGetValue(bestClass, out var detectedClass)) continue;
-
-            raw.Add(new RawDetection(detectedClass, bestScore, cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2));
         }
 
         var afterNms = NonMaxSuppression.ApplyPerClass(raw, _options.NmsIouThreshold);
