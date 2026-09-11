@@ -82,7 +82,7 @@ public sealed partial class DashboardViewModel(ServerConnection connection) : Ob
         [
             new PieSeries<double> { Values = [stats.Normal], Name = "정상", Fill = StatusToBrushToSkia(StatusToBrushConverter.Worn) },
             new PieSeries<double> { Values = [stats.CheckRequired], Name = "점검 필요", Fill = StatusToBrushToSkia(StatusToBrushConverter.NotWorn) },
-            new PieSeries<double> { Values = [stats.Unconfirmed], Name = "미확인", Fill = StatusToBrushToSkia(StatusToBrushConverter.Unknown) },
+            new PieSeries<double> { Values = [stats.Unconfirmed], Name = "미착용", Fill = StatusToBrushToSkia(StatusToBrushConverter.NotWorn) },
         ];
     }
 

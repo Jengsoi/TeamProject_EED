@@ -20,7 +20,7 @@
                         <TextBlock Text="전체 검사" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13"/>
                         <TextBlock Text="{Binding Total}" FontSize="30" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}"/>
                         <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0">
-                            <Run Text="미확인 "/><Run Text="{Binding Unconfirmed, Mode=OneWay}"/><Run Text="건"/>
+                            <Run Text="미착용 "/><Run Text="{Binding Unconfirmed, Mode=OneWay}"/><Run Text="건"/>
                         </TextBlock>
                     </StackPanel>
                 </Border>
