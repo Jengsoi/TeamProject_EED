@@ -4,7 +4,17 @@
              xmlns:lvc="clr-namespace:LiveChartsCore.SkiaSharpView.WPF;assembly=LiveChartsCore.SkiaSharpView.WPF">
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel>
-            <TextBlock Text="통계 분석" FontSize="24" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,16"/>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="통계 분석" FontSize="24" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}"/>
+                <Button Grid.Column="1" Content="CSV로 내보내기" Command="{Binding ExportCsvCommand}"
+                        Visibility="{Binding IsEmpty, Converter={StaticResource InverseBooleanConverter}}"
+                        Padding="14,8" Background="{StaticResource NavyBrush}" Foreground="White" BorderThickness="0"
+                        VerticalAlignment="Center" Cursor="Hand"/>
+            </Grid>
 
             <Grid Margin="0,0,0,16">
                 <Grid.ColumnDefinitions>

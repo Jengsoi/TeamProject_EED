@@ -1,8 +1,12 @@
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using LiveChartsCore;
 using LiveChartsCore.SkiaSharpView;
 using LiveChartsCore.SkiaSharpView.Painting;
+using Microsoft.Win32;
 using SafetyVision.Client.Converters;
 using SafetyVision.Client.Networking;
 using SafetyVision.Protocol;
@@ -37,6 +41,8 @@ public sealed partial class StatisticsViewModel(ServerConnection connection) : O
     public ObservableCollection<EquipmentBreakdownRow> Rows { get; } = [];
     public ObservableCollection<CameraBreakdownRow> CameraRows { get; } = [];
 
+    private StatisticsResponsePayload? _lastStats;
+
     public async Task LoadAsync()
     {
         IsLoading = true;
@@ -57,8 +63,71 @@ public sealed partial class StatisticsViewModel(ServerConnection connection) : O
         }
     }
 
+    [RelayCommand]
+    private void ExportCsv()
+    {
+        if (_lastStats is null) return;
+
+        var dialog = new SaveFileDialog
+        {
+            Title = "통계 내보내기",
+            FileName = $"SafetyVision_통계_{DateTime.Now:yyyyMMdd_HHmm}.csv",
+            Filter = "CSV 파일 (*.csv)|*.csv",
+            DefaultExt = ".csv",
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            File.WriteAllText(dialog.FileName, BuildCsv(_lastStats), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+            ErrorMessage = null;
+        }
+        catch (Exception)
+        {
+            ErrorMessage = "파일로 내보내지 못했습니다.";
+        }
+    }
+
+    private static string BuildCsv(StatisticsResponsePayload stats)
+    {
+        var sb = new StringBuilder();
+        void Row(params object[] values) => sb.AppendLine(string.Join(",", values));
+
+        Row("SafetyVision 통계", DateTime.Now.ToString("yyyy-MM-dd HH:mm"));
+        Row("전체 검사", stats.Total);
+        Row("정상", stats.Normal);
+        Row("점검 필요", stats.CheckRequired);
+        sb.AppendLine();
+
+        Row("[장비별 착용 현황]");
+        Row("장비", "착용", "미착용", "미확인", "합계");
+        foreach (var b in stats.Breakdown)
+            Row(DashboardViewModel.LabelFor(b.EquipmentCode), b.Worn, b.NotWorn, b.Unknown, b.Worn + b.NotWorn + b.Unknown);
+        sb.AppendLine();
+
+        Row("[카메라별 현황]");
+        Row("카메라", "전체", "정상", "점검 필요");
+        foreach (var c in stats.CameraBreakdown)
+            Row(c.CameraName, c.Total, c.Normal, c.CheckRequired);
+        sb.AppendLine();
+
+        Row("[일별 추이]");
+        Row("날짜", "정상", "점검 필요");
+        foreach (var d in stats.DailyTrend)
+            Row(d.Date.ToString("yyyy-MM-dd"), d.Normal, d.CheckRequired);
+        sb.AppendLine();
+
+        Row("[월별 추이]");
+        Row("연월", "정상", "점검 필요");
+        foreach (var m in stats.MonthlyTrend)
+            Row($"{m.Year}-{m.Month:00}", m.Normal, m.CheckRequired);
+
+        return sb.ToString();
+    }
+
     private void Apply(StatisticsResponsePayload stats)
     {
+        _lastStats = stats;
         Total = stats.Total;
         Normal = stats.Normal;
         CheckRequired = stats.CheckRequired;
