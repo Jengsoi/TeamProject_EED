@@ -164,6 +164,14 @@ public sealed class ClientSession(
         _lastDetection = detection;
         var eval = FrameAnalyzer.Evaluate(detection.Boxes, detection.Width, detection.Height, options);
 
+        if (_stateMachine.State == InspectionState.Inspecting)
+        {
+            var boxesText = string.Join(", ", detection.Boxes.Select(b => $"{b.Class}={b.Confidence:0.00}"));
+            logger.LogWarning("[DEBUG] state={State} cond={Cond} boxes=[{Boxes}] votes=[{Votes}]",
+                _stateMachine.State, eval.Condition, boxesText,
+                string.Join(", ", eval.Votes.Select(v => $"{v.Key}={v.Value}")));
+        }
+
         bool wasInspecting = _stateMachine.State == InspectionState.Inspecting;
         int beforeCount = _stateMachine.FrameVotes.Count;
         bool justCompleted = _stateMachine.ProcessFrame(eval, NowSeconds());
