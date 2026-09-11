@@ -4,8 +4,14 @@ public sealed record StatisticsRequestPayload;
 
 public sealed record EquipmentBreakdownPayload(string EquipmentCode, int Worn, int NotWorn, int Unknown);
 
+public sealed record DailyTrendPointPayload(DateOnly Date, int Normal, int CheckRequired);
+
+public sealed record MonthlyTrendPointPayload(int Year, int Month, int Normal, int CheckRequired);
+
 public sealed record StatisticsResponsePayload(
     int Total,
     int Normal,
     int CheckRequired,
-    IReadOnlyList<EquipmentBreakdownPayload> Breakdown);
+    IReadOnlyList<EquipmentBreakdownPayload> Breakdown,
+    IReadOnlyList<DailyTrendPointPayload> DailyTrend,
+    IReadOnlyList<MonthlyTrendPointPayload> MonthlyTrend);

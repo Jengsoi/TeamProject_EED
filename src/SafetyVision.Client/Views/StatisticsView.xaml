@@ -48,6 +48,20 @@
                 </StackPanel>
             </Border>
 
+            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,16" Visibility="{Binding IsEmpty, Converter={StaticResource InverseBooleanConverter}}">
+                <StackPanel>
+                    <TextBlock Text="일별 추이 (최근 14일)" FontSize="18" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,10"/>
+                    <lvc:CartesianChart Series="{Binding DailySeries}" XAxes="{Binding DailyXAxes}" Height="260"/>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,16" Visibility="{Binding IsEmpty, Converter={StaticResource InverseBooleanConverter}}">
+                <StackPanel>
+                    <TextBlock Text="월별 추이 (최근 6개월)" FontSize="18" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,10"/>
+                    <lvc:CartesianChart Series="{Binding MonthlySeries}" XAxes="{Binding MonthlyXAxes}" Height="260"/>
+                </StackPanel>
+            </Border>
+
             <Border Style="{StaticResource CardStyle}" Visibility="{Binding IsEmpty, Converter={StaticResource InverseBooleanConverter}}">
                 <StackPanel>
                     <TextBlock Text="장비별 상세 건수" FontSize="18" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,10"/>

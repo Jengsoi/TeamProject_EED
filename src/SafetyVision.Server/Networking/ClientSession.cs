@@ -123,10 +123,14 @@ public sealed class ClientSession(
 
         var stats = await dashboardSvc.GetStatsAsync(ct).ConfigureAwait(false);
         var breakdown = await statsSvc.GetEquipmentBreakdownAsync(ct).ConfigureAwait(false);
+        var dailyTrend = await statsSvc.GetDailyTrendAsync(14, ct).ConfigureAwait(false);
+        var monthlyTrend = await statsSvc.GetMonthlyTrendAsync(6, ct).ConfigureAwait(false);
 
         var payload = new StatisticsResponsePayload(
             stats.Total, stats.Normal, stats.CheckRequired + stats.Unconfirmed,
-            breakdown.Select(b => new EquipmentBreakdownPayload(EquipmentClassMap.ToDbCode(b.Code), b.Worn, b.NotWorn, b.Unknown)).ToList());
+            breakdown.Select(b => new EquipmentBreakdownPayload(EquipmentClassMap.ToDbCode(b.Code), b.Worn, b.NotWorn, b.Unknown)).ToList(),
+            dailyTrend.Select(d => new DailyTrendPointPayload(d.Date, d.Normal, d.CheckRequired)).ToList(),
+            monthlyTrend.Select(m => new MonthlyTrendPointPayload(m.Year, m.Month, m.Normal, m.CheckRequired)).ToList());
 
         await SendAsync(MessageTypes.StatisticsResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
     }

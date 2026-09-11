@@ -25,6 +25,12 @@ public sealed partial class StatisticsViewModel(ServerConnection connection) : O
     [ObservableProperty] private ISeries[] breakdownSeries = [];
     [ObservableProperty] private Axis[] breakdownXAxes = [new Axis { Labels = ["안전모", "안전조끼", "마스크"] }];
 
+    [ObservableProperty] private ISeries[] dailySeries = [];
+    [ObservableProperty] private Axis[] dailyXAxes = [];
+
+    [ObservableProperty] private ISeries[] monthlySeries = [];
+    [ObservableProperty] private Axis[] monthlyXAxes = [];
+
     public ObservableCollection<EquipmentBreakdownRow> Rows { get; } = [];
 
     public async Task LoadAsync()
@@ -73,6 +79,20 @@ public sealed partial class StatisticsViewModel(ServerConnection connection) : O
             new ColumnSeries<double> { Values = worn, Name = "착용", Fill = ToSkia(StatusToBrushConverter.Worn) },
             new ColumnSeries<double> { Values = notWorn, Name = "미착용", Fill = ToSkia(StatusToBrushConverter.NotWorn) },
             new ColumnSeries<double> { Values = unknown, Name = "미확인", Fill = ToSkia(StatusToBrushConverter.Unknown) },
+        ];
+
+        DailyXAxes = [new Axis { Labels = stats.DailyTrend.Select(d => d.Date.ToString("MM/dd")).ToArray() }];
+        DailySeries =
+        [
+            new ColumnSeries<double> { Values = stats.DailyTrend.Select(d => (double)d.Normal).ToArray(), Name = "정상", Fill = ToSkia(StatusToBrushConverter.Worn) },
+            new ColumnSeries<double> { Values = stats.DailyTrend.Select(d => (double)d.CheckRequired).ToArray(), Name = "점검 필요", Fill = ToSkia(StatusToBrushConverter.NotWorn) },
+        ];
+
+        MonthlyXAxes = [new Axis { Labels = stats.MonthlyTrend.Select(m => $"{m.Year}-{m.Month:00}").ToArray() }];
+        MonthlySeries =
+        [
+            new ColumnSeries<double> { Values = stats.MonthlyTrend.Select(m => (double)m.Normal).ToArray(), Name = "정상", Fill = ToSkia(StatusToBrushConverter.Worn) },
+            new ColumnSeries<double> { Values = stats.MonthlyTrend.Select(m => (double)m.CheckRequired).ToArray(), Name = "점검 필요", Fill = ToSkia(StatusToBrushConverter.NotWorn) },
         ];
     }
 

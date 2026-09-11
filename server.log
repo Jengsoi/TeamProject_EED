@@ -26,7 +26,7 @@ info: Microsoft.EntityFrameworkCore.Database.Command[20101]
       Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
       SELECT RELEASE_LOCK('__safetyvision_EFMigrationsLock')
 info: Microsoft.EntityFrameworkCore.Database.Command[20101]
-      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
       SELECT EXISTS (
           SELECT 1
           FROM `Users` AS `u`
