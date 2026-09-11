@@ -238,3 +238,71 @@ info: Microsoft.EntityFrameworkCore.Database.Command[20101]
       ORDER BY `i1`.`InspectedAt` DESC, `i1`.`Id` DESC
 info: SafetyVision.Server.Networking.ClientSession[0]
       클라이언트 연결 종료: IOException
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__loginId_0='?' (Size = 64)], CommandType='Text', CommandTimeout='30']
+      SELECT `u`.`Id`, `u`.`CreatedAt`, `u`.`LoginId`, `u`.`Name`, `u`.`PasswordHash`
+      FROM `Users` AS `u`
+      WHERE `u`.`LoginId` = @__loginId_0
+      LIMIT 2
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM `Inspections` AS `i`
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM `Inspections` AS `i`
+      WHERE `i`.`Result` = 'NORMAL'
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM `Inspections` AS `i`
+      WHERE `i`.`Result` = 'CHECK_REQUIRED'
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM `Inspections` AS `i`
+      WHERE `i`.`Result` = 'UNCONFIRMED'
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__dbCode_0='?' (Size = 20)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM `InspectionItems` AS `i`
+      WHERE `i`.`EquipmentCode` = @__dbCode_0
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__dbCode_0='?' (Size = 20)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM `InspectionItems` AS `i`
+      WHERE (`i`.`EquipmentCode` = @__dbCode_0) AND (`i`.`Status` = 'WORN')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__dbCode_0='?' (Size = 20)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM `InspectionItems` AS `i`
+      WHERE `i`.`EquipmentCode` = @__dbCode_0
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__dbCode_0='?' (Size = 20)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM `InspectionItems` AS `i`
+      WHERE (`i`.`EquipmentCode` = @__dbCode_0) AND (`i`.`Status` = 'WORN')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__dbCode_0='?' (Size = 20)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM `InspectionItems` AS `i`
+      WHERE `i`.`EquipmentCode` = @__dbCode_0
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__dbCode_0='?' (Size = 20)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM `InspectionItems` AS `i`
+      WHERE (`i`.`EquipmentCode` = @__dbCode_0) AND (`i`.`Status` = 'WORN')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@__p_0='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT `i1`.`Id`, `i1`.`CreatedAt`, `i1`.`ImagePath`, `i1`.`InspectedAt`, `i1`.`InspectionKey`, `i1`.`ModelName`, `i1`.`ModelVersion`, `i1`.`PersonConfidence`, `i1`.`Result`, `i0`.`Id`, `i0`.`CreatedAt`, `i0`.`EquipmentCode`, `i0`.`InspectionId`, `i0`.`NegativeFrames`, `i0`.`PositiveFrames`, `i0`.`Score`, `i0`.`Status`, `i0`.`TotalFrames`
+      FROM (
+          SELECT `i`.`Id`, `i`.`CreatedAt`, `i`.`ImagePath`, `i`.`InspectedAt`, `i`.`InspectionKey`, `i`.`ModelName`, `i`.`ModelVersion`, `i`.`PersonConfidence`, `i`.`Result`
+          FROM `Inspections` AS `i`
+          ORDER BY `i`.`InspectedAt` DESC, `i`.`Id` DESC
+          LIMIT @__p_0
+      ) AS `i1`
+      LEFT JOIN `InspectionItems` AS `i0` ON `i1`.`Id` = `i0`.`InspectionId`
+      ORDER BY `i1`.`InspectedAt` DESC, `i1`.`Id` DESC
+info: SafetyVision.Server.Networking.ClientSession[0]
+      클라이언트 연결 종료: IOException
