@@ -24,8 +24,6 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     private VideoCapture? _capture;
     private Thread? _captureThread;
     private volatile bool _captureRunning;
-    private int _reportedWidth;
-    private int _reportedHeight;
 
     public SiteInspectionViewModel(ServerConnection connection)
     {
@@ -57,6 +55,10 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     [ObservableProperty] private double roiTop = 0.05;
     [ObservableProperty] private double roiRight = 0.80;
     [ObservableProperty] private double roiBottom = 0.95;
+
+    // 실제 카메라 해상도(비율). ROI 오버레이를 영상과 같은 고정 비율 캔버스에 겹쳐 항상 정렬되게 한다.
+    [ObservableProperty] private int frameWidth = 1280;
+    [ObservableProperty] private int frameHeight = 720;
 
     public ObservableCollection<EquipmentDisplayItem> ResultItems { get; } = [];
 
@@ -104,10 +106,10 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
 
         _capture.Set(VideoCaptureProperties.FrameWidth, ClientSettings.CameraWidth);
         _capture.Set(VideoCaptureProperties.FrameHeight, ClientSettings.CameraHeight);
-        _reportedWidth = (int)_capture.Get(VideoCaptureProperties.FrameWidth);
-        _reportedHeight = (int)_capture.Get(VideoCaptureProperties.FrameHeight);
-        if (_reportedWidth <= 0) _reportedWidth = ClientSettings.CameraWidth;
-        if (_reportedHeight <= 0) _reportedHeight = ClientSettings.CameraHeight;
+        int reportedWidth = (int)_capture.Get(VideoCaptureProperties.FrameWidth);
+        int reportedHeight = (int)_capture.Get(VideoCaptureProperties.FrameHeight);
+        FrameWidth = reportedWidth > 0 ? reportedWidth : ClientSettings.CameraWidth;
+        FrameHeight = reportedHeight > 0 ? reportedHeight : ClientSettings.CameraHeight;
 
         await StartSessionAsync();
 
@@ -120,7 +122,7 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     {
         try
         {
-            var envelope = await _connection.RequestAsync(MessageTypes.InspectionSessionStart, new InspectionSessionStartPayload(_reportedWidth, _reportedHeight));
+            var envelope = await _connection.RequestAsync(MessageTypes.InspectionSessionStart, new InspectionSessionStartPayload(FrameWidth, FrameHeight));
             var started = envelope.DeserializePayload<InspectionSessionStartedPayload>();
             if (started.Success)
             {
