@@ -7,10 +7,10 @@ public sealed record HistoryRow(long Id, DateTime InspectedAtUtc, string Hardhat
 
 public sealed record HistoryPage(int Page, int TotalPages, int TotalCount, IReadOnlyList<HistoryRow> Rows);
 
-// 04_DB설계.md 8절 / 02_요구사항.md FR-10: 최신순, 페이지당 50건.
+// 04_DB설계.md 8절 / 02_요구사항.md FR-10 원안은 페이지당 50건이었으나, 팀 결정에 따라 10건으로 변경.
 public sealed class HistoryQueryService(SafetyVisionDbContext db)
 {
-    private const int PageSize = 50;
+    private const int PageSize = 10;
 
     public async Task<HistoryPage> GetPageAsync(int page, DateTime? fromUtc, DateTime? toUtc, string? resultFilter, CancellationToken ct)
     {
