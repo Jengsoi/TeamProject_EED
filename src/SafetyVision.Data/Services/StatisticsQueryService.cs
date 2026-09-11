@@ -7,11 +7,26 @@ namespace SafetyVision.Data.Services;
 public sealed record EquipmentStatusCount(EquipmentCode Code, int Worn, int NotWorn, int Unknown);
 public sealed record DailyTrendPoint(DateOnly Date, int Normal, int CheckRequired);
 public sealed record MonthlyTrendPoint(int Year, int Month, int Normal, int CheckRequired);
+public sealed record CameraStatusCount(string CameraName, int Total, int Normal, int CheckRequired);
 
-// 통계 분석 화면 전용: 대시보드보다 상세한 장비별 착용/미착용/미확인 건수, 일별/월별 추이를 제공한다.
-// 카메라·업장별 통계는 현재 스키마에 해당 구분이 없어(카메라 1대 고정, 업장 개념 없음) 제공하지 않는다.
+// 통계 분석 화면 전용: 대시보드보다 상세한 장비별 착용/미착용/미확인 건수, 일별/월별 추이, 카메라별 현황을 제공한다.
+// 지금은 카메라가 1대뿐이라 결과가 항상 한 줄이지만, 카메라 구분값(CameraName)은 검사마다 DB에 저장되므로
+// 카메라가 늘어나도 이 쿼리는 그대로 동작한다.
 public sealed class StatisticsQueryService(SafetyVisionDbContext db)
 {
+    public async Task<IReadOnlyList<CameraStatusCount>> GetCameraBreakdownAsync(CancellationToken ct)
+    {
+        var rows = await db.Inspections
+            .Select(i => new { i.CameraName, i.Result })
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(r => string.IsNullOrEmpty(r.CameraName) ? "CAM 01" : r.CameraName)
+            .Select(g => new CameraStatusCount(g.Key, g.Count(), g.Count(x => x.Result == "NORMAL"), g.Count(x => x.Result != "NORMAL")))
+            .OrderBy(c => c.CameraName)
+            .ToList();
+    }
+
     public async Task<IReadOnlyList<EquipmentStatusCount>> GetEquipmentBreakdownAsync(CancellationToken ct)
     {
         var result = new List<EquipmentStatusCount>();

@@ -38,6 +38,7 @@ public sealed class InspectionSaveServiceTests : IAsyncLifetime
         ],
         RepresentativeJpeg: null,
         PersonConfidence: 0.93,
+        CameraName: "CAM 01",
         ModelName: "ayushgupta7777/safetyvision-yolov8",
         ModelVersion: "v2");
 

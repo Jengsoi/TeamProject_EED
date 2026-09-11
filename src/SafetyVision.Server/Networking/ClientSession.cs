@@ -32,6 +32,7 @@ public sealed class ClientSession(
     private DetectionFrame? _lastDetection;
     private byte[]? _lastFrameJpeg;
     private SaveInspectionRequest? _pendingSave;
+    private string _cameraName = "CAM 01";
 
     private sealed record AnalysisFrameRecord(byte[] Jpeg, IReadOnlyList<DetectedBox> Boxes, double PersonConfidence);
 
@@ -110,7 +111,7 @@ public sealed class ClientSession(
             stats.EquipmentRates.Select(r => new EquipmentRatePayload(EquipmentClassMap.ToDbCode(r.Code), r.WornRatio)).ToList(),
             stats.Recent.Select(r => new RecentInspectionPayload(
                 r.Id, new DateTimeOffset(DateTime.SpecifyKind(r.InspectedAtUtc, DateTimeKind.Utc)),
-                "CAM 01", r.Hardhat, r.Vest, r.Mask, r.Result, r.HasImage)).ToList());
+                string.IsNullOrEmpty(r.CameraName) ? "CAM 01" : r.CameraName, r.Hardhat, r.Vest, r.Mask, r.Result, r.HasImage)).ToList());
 
         await SendAsync(MessageTypes.DashboardStatsResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
     }
@@ -125,18 +126,23 @@ public sealed class ClientSession(
         var breakdown = await statsSvc.GetEquipmentBreakdownAsync(ct).ConfigureAwait(false);
         var dailyTrend = await statsSvc.GetDailyTrendAsync(14, ct).ConfigureAwait(false);
         var monthlyTrend = await statsSvc.GetMonthlyTrendAsync(6, ct).ConfigureAwait(false);
+        var cameraBreakdown = await statsSvc.GetCameraBreakdownAsync(ct).ConfigureAwait(false);
 
         var payload = new StatisticsResponsePayload(
             stats.Total, stats.Normal, stats.CheckRequired + stats.Unconfirmed,
             breakdown.Select(b => new EquipmentBreakdownPayload(EquipmentClassMap.ToDbCode(b.Code), b.Worn, b.NotWorn, b.Unknown)).ToList(),
             dailyTrend.Select(d => new DailyTrendPointPayload(d.Date, d.Normal, d.CheckRequired)).ToList(),
-            monthlyTrend.Select(m => new MonthlyTrendPointPayload(m.Year, m.Month, m.Normal, m.CheckRequired)).ToList());
+            monthlyTrend.Select(m => new MonthlyTrendPointPayload(m.Year, m.Month, m.Normal, m.CheckRequired)).ToList(),
+            cameraBreakdown.Select(c => new CameraBreakdownPayload(c.CameraName, c.Total, c.Normal, c.CheckRequired)).ToList());
 
         await SendAsync(MessageTypes.StatisticsResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
     }
 
     private async Task HandleSessionStartAsync(Envelope envelope, CancellationToken ct)
     {
+        var req = envelope.DeserializePayload<InspectionSessionStartPayload>();
+        if (!string.IsNullOrWhiteSpace(req.CameraName)) _cameraName = req.CameraName;
+
         var payload = new InspectionSessionStartedPayload(true, null, options.RoiLeft, options.RoiTop, options.RoiRight, options.RoiBottom);
         await SendAsync(MessageTypes.InspectionSessionStarted, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
     }
@@ -308,7 +314,7 @@ public sealed class ClientSession(
 
         _pendingSave = new SaveInspectionRequest(
             _stateMachine.InspectionKey, DateTime.UtcNow, outcome.Result, outcome.Items,
-            representativeJpeg, personConfidence, options.ModelName, options.ModelVersion);
+            representativeJpeg, personConfidence, _cameraName, options.ModelName, options.ModelVersion);
 
         await PersistPendingSaveAsync(ct).ConfigureAwait(false);
         _analysisFrames.Clear();

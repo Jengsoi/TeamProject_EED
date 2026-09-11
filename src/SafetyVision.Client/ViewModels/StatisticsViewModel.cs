@@ -31,7 +31,11 @@ public sealed partial class StatisticsViewModel(ServerConnection connection) : O
     [ObservableProperty] private ISeries[] monthlySeries = [];
     [ObservableProperty] private Axis[] monthlyXAxes = [];
 
+    [ObservableProperty] private ISeries[] cameraSeries = [];
+    [ObservableProperty] private Axis[] cameraXAxes = [];
+
     public ObservableCollection<EquipmentBreakdownRow> Rows { get; } = [];
+    public ObservableCollection<CameraBreakdownRow> CameraRows { get; } = [];
 
     public async Task LoadAsync()
     {
@@ -94,6 +98,17 @@ public sealed partial class StatisticsViewModel(ServerConnection connection) : O
             new ColumnSeries<double> { Values = stats.MonthlyTrend.Select(m => (double)m.Normal).ToArray(), Name = "정상", Fill = ToSkia(StatusToBrushConverter.Worn) },
             new ColumnSeries<double> { Values = stats.MonthlyTrend.Select(m => (double)m.CheckRequired).ToArray(), Name = "점검 필요", Fill = ToSkia(StatusToBrushConverter.NotWorn) },
         ];
+
+        CameraRows.Clear();
+        foreach (var c in stats.CameraBreakdown)
+            CameraRows.Add(new CameraBreakdownRow(c.CameraName, c.Total, c.Normal, c.CheckRequired));
+
+        CameraXAxes = [new Axis { Labels = stats.CameraBreakdown.Select(c => c.CameraName).ToArray() }];
+        CameraSeries =
+        [
+            new ColumnSeries<double> { Values = stats.CameraBreakdown.Select(c => (double)c.Normal).ToArray(), Name = "정상", Fill = ToSkia(StatusToBrushConverter.Worn) },
+            new ColumnSeries<double> { Values = stats.CameraBreakdown.Select(c => (double)c.CheckRequired).ToArray(), Name = "점검 필요", Fill = ToSkia(StatusToBrushConverter.NotWorn) },
+        ];
     }
 
     private static SolidColorPaint ToSkia(System.Windows.Media.SolidColorBrush brush) =>
@@ -104,3 +119,5 @@ public sealed record EquipmentBreakdownRow(string Label, int Worn, int NotWorn, 
 {
     public int Total => Worn + NotWorn + Unknown;
 }
+
+public sealed record CameraBreakdownRow(string CameraName, int Total, int Normal, int CheckRequired);

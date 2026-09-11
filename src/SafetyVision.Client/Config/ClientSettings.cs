@@ -10,6 +10,9 @@ public static class ClientSettings
     public const int CameraWidth = 1280;
     public const int CameraHeight = 720;
 
+    // 카메라를 여러 대로 늘릴 때, 클라이언트 인스턴스마다 이 값을 다르게 설정한다.
+    public const string CameraName = "CAM 01";
+
     public const int MaxFrameSendFps = 6;
     public const int FrameJpegQuality = 80;
 }

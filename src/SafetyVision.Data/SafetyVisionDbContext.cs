@@ -32,6 +32,7 @@ public sealed class SafetyVisionDbContext(DbContextOptions<SafetyVisionDbContext
             e.Property(i => i.InspectedAt).HasColumnType("datetime(6)");
             e.Property(i => i.Result).HasMaxLength(20).IsRequired();
             e.Property(i => i.ImagePath).HasMaxLength(255).IsRequired();
+            e.Property(i => i.CameraName).HasMaxLength(100).IsRequired();
             e.Property(i => i.ModelName).HasMaxLength(100).IsRequired();
             e.Property(i => i.ModelVersion).HasMaxLength(50).IsRequired();
             e.Property(i => i.CreatedAt).HasColumnType("datetime(6)");

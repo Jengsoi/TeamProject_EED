@@ -142,7 +142,7 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     {
         try
         {
-            var envelope = await _connection.RequestAsync(MessageTypes.InspectionSessionStart, new InspectionSessionStartPayload(FrameWidth, FrameHeight));
+            var envelope = await _connection.RequestAsync(MessageTypes.InspectionSessionStart, new InspectionSessionStartPayload(FrameWidth, FrameHeight, ClientSettings.CameraName));
             var started = envelope.DeserializePayload<InspectionSessionStartedPayload>();
             if (started.Success)
             {

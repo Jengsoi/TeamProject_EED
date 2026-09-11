@@ -13,6 +13,7 @@ public sealed record SaveInspectionRequest(
     IReadOnlyList<EquipmentJudgement> Items,
     byte[]? RepresentativeJpeg,
     double? PersonConfidence,
+    string CameraName,
     string ModelName,
     string ModelVersion);
 
@@ -53,6 +54,7 @@ public sealed class InspectionSaveService(SafetyVisionDbContext db, ILogger<Insp
                     Result = request.Result.ToDbCode(),
                     PersonConfidence = request.PersonConfidence,
                     ImagePath = "",
+                    CameraName = request.CameraName,
                     ModelName = request.ModelName,
                     ModelVersion = request.ModelVersion,
                     CreatedAt = DateTime.UtcNow,
