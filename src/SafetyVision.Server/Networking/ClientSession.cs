@@ -69,6 +69,7 @@ public sealed class ClientSession(
         MessageTypes.LoginRequest => HandleLoginAsync(envelope, ct),
         MessageTypes.LogoutRequest => HandleLogoutAsync(envelope, ct),
         MessageTypes.DashboardStatsRequest => HandleDashboardStatsAsync(envelope, ct),
+        MessageTypes.StatisticsRequest => HandleStatisticsAsync(envelope, ct),
         MessageTypes.InspectionSessionStart => HandleSessionStartAsync(envelope, ct),
         MessageTypes.FrameMeta => HandleFrameMetaAsync(envelope, ct),
         MessageTypes.RetryInspectionRequest => HandleRetryInspectionAsync(envelope, ct),
@@ -112,6 +113,22 @@ public sealed class ClientSession(
                 "CAM 01", r.Hardhat, r.Vest, r.Mask, r.Result, r.HasImage)).ToList());
 
         await SendAsync(MessageTypes.DashboardStatsResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
+    }
+
+    private async Task HandleStatisticsAsync(Envelope envelope, CancellationToken ct)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var dashboardSvc = scope.ServiceProvider.GetRequiredService<DashboardQueryService>();
+        var statsSvc = scope.ServiceProvider.GetRequiredService<StatisticsQueryService>();
+
+        var stats = await dashboardSvc.GetStatsAsync(ct).ConfigureAwait(false);
+        var breakdown = await statsSvc.GetEquipmentBreakdownAsync(ct).ConfigureAwait(false);
+
+        var payload = new StatisticsResponsePayload(
+            stats.Total, stats.Normal, stats.CheckRequired + stats.Unconfirmed,
+            breakdown.Select(b => new EquipmentBreakdownPayload(EquipmentClassMap.ToDbCode(b.Code), b.Worn, b.NotWorn, b.Unknown)).ToList());
+
+        await SendAsync(MessageTypes.StatisticsResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
     }
 
     private async Task HandleSessionStartAsync(Envelope envelope, CancellationToken ct)

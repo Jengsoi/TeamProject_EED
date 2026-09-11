@@ -17,6 +17,9 @@
         <DataTemplate DataType="{x:Type vm:HistoryViewModel}">
             <views:HistoryView/>
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:StatisticsViewModel}">
+            <views:StatisticsView/>
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:PlaceholderViewModel}">
             <views:PlaceholderView/>
         </DataTemplate>
@@ -46,7 +49,7 @@
                     <Button Content="대시보드" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigateDashboardCommand}"/>
                     <Button Content="현장 검사" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigateSiteInspectionCommand}"/>
                     <Button Content="검사 이력" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigateHistoryCommand}"/>
-                    <Button Content="통계 분석" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigatePlaceholderCommand}" CommandParameter="통계 분석"/>
+                    <Button Content="통계 분석" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigateStatisticsCommand}"/>
                     <Button Content="카메라 관리" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigatePlaceholderCommand}" CommandParameter="카메라 관리"/>
                     <Button Content="장비 관리" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigatePlaceholderCommand}" CommandParameter="장비 관리"/>
                     <Button Content="사용자 관리" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigatePlaceholderCommand}" CommandParameter="사용자 관리"/>

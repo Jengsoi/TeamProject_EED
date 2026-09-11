@@ -31,6 +31,7 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<DashboardQueryService>();
 builder.Services.AddScoped<HistoryQueryService>();
 builder.Services.AddScoped<InspectionSaveService>();
+builder.Services.AddScoped<StatisticsQueryService>();
 
 if (options.UseFakeDetection)
     builder.Services.AddSingleton<IPpeDetector, FakePpeDetector>();

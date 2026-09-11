@@ -18,6 +18,7 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly DashboardViewModel _dashboardVm;
     private readonly SiteInspectionViewModel _siteInspectionVm;
     private readonly HistoryViewModel _historyVm;
+    private readonly StatisticsViewModel _statisticsVm;
 
     public event Action? LoggedOut;
     public event Action? ConnectionLost;
@@ -33,6 +34,7 @@ public sealed partial class ShellViewModel : ObservableObject
         _siteInspectionVm = new SiteInspectionViewModel(connection);
         _siteInspectionVm.ReturnToDashboardRequested += () => NavigateDashboardCommand.Execute(null);
         _historyVm = new HistoryViewModel(connection);
+        _statisticsVm = new StatisticsViewModel(connection);
 
         Connection.Disconnected += OnConnectionDisconnected;
 
@@ -73,6 +75,15 @@ public sealed partial class ShellViewModel : ObservableObject
         ActiveMenu = "history";
         CurrentViewModel = _historyVm;
         await _historyVm.LoadAsync(1);
+    }
+
+    [RelayCommand]
+    private async Task NavigateStatisticsAsync()
+    {
+        await LeaveSiteInspectionIfNeededAsync();
+        ActiveMenu = "statistics";
+        CurrentViewModel = _statisticsVm;
+        await _statisticsVm.LoadAsync();
     }
 
     [RelayCommand]
