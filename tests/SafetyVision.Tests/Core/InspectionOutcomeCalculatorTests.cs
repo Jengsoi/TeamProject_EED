@@ -34,14 +34,15 @@ public class InspectionOutcomeCalculatorTests
     }
 
     [Fact]
-    public void UnknownWithoutNotWorn_IsUnconfirmed()
+    public void UnknownWithoutNotWorn_IsCheckRequired()
     {
+        // 임시 조치(팀 결정): 최종 결과는 정상/점검 필요 2가지로만 단순화. 미확인 장비가 있어도 점검 필요로 취급.
         var items = new[]
         {
             Item(EquipmentCode.Hardhat, EquipmentStatus.Worn),
             Item(EquipmentCode.Vest, EquipmentStatus.Unknown),
             Item(EquipmentCode.Mask, EquipmentStatus.Worn),
         };
-        Assert.Equal(InspectionResultType.Unconfirmed, InspectionOutcomeCalculator.Combine(items));
+        Assert.Equal(InspectionResultType.CheckRequired, InspectionOutcomeCalculator.Combine(items));
     }
 }

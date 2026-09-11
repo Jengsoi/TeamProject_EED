@@ -17,7 +17,6 @@ public sealed partial class DashboardViewModel(ServerConnection connection) : Ob
     [ObservableProperty] private int total;
     [ObservableProperty] private int normal;
     [ObservableProperty] private int checkRequired;
-    [ObservableProperty] private int unconfirmed;
     [ObservableProperty] private bool isEmpty;
     [ObservableProperty] private bool isLoading;
     [ObservableProperty] private string? errorMessage;
@@ -50,10 +49,11 @@ public sealed partial class DashboardViewModel(ServerConnection connection) : Ob
 
     private void Apply(DashboardStatsResponsePayload stats)
     {
+        // 임시 조치(팀 결정): 최종 결과는 정상/점검 필요 2가지로 단순화. 예전 데이터의 미확인(Unconfirmed)도
+        // 화면에서는 점검 필요로 합산해서 보여준다.
         Total = stats.Total;
         Normal = stats.Normal;
-        CheckRequired = stats.CheckRequired;
-        Unconfirmed = stats.Unconfirmed;
+        CheckRequired = stats.CheckRequired + stats.Unconfirmed;
         IsEmpty = stats.Total == 0;
 
         Recent.Clear();
@@ -81,8 +81,7 @@ public sealed partial class DashboardViewModel(ServerConnection connection) : Ob
         PieSeries =
         [
             new PieSeries<double> { Values = [stats.Normal], Name = "정상", Fill = StatusToBrushToSkia(StatusToBrushConverter.Worn) },
-            new PieSeries<double> { Values = [stats.CheckRequired], Name = "점검 필요", Fill = StatusToBrushToSkia(StatusToBrushConverter.NotWorn) },
-            new PieSeries<double> { Values = [stats.Unconfirmed], Name = "미착용", Fill = new SolidColorPaint(new SKColor(0xDC, 0x26, 0x26)) },
+            new PieSeries<double> { Values = [CheckRequired], Name = "점검 필요", Fill = StatusToBrushToSkia(StatusToBrushConverter.NotWorn) },
         ];
     }
 

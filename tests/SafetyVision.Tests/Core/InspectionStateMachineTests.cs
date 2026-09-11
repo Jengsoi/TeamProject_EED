@@ -90,10 +90,10 @@ public class InspectionStateMachineTests
     }
 
     [Fact]
-    public void MaxDurationWithFewFrames_CompletesAsNotWorn()
+    public void MaxDurationWithFewFrames_CompletesAsUnknownItemsButCheckRequiredOverall()
     {
-        // 임시 조치: Unknown을 내보내지 않고 NotWorn으로 표시하므로(EquipmentJudge 참고),
-        // 증거 부족 상황도 CheckRequired로 귀결된다.
+        // 개별 장비는 미확인(Unknown)을 유지하지만, 최종 결과는 2가지(정상/점검 필요)로 단순화되어
+        // "미확인 장비가 있으면 점검 필요"로 귀결된다(InspectionOutcomeCalculator 참고).
         var sm = new InspectionStateMachine(new SafetyVisionOptions());
         EnterInspecting(sm, startNow: 0.0);
 
@@ -101,7 +101,7 @@ public class InspectionStateMachineTests
 
         Assert.True(completedNow);
         Assert.Equal(InspectionState.Result, sm.State);
-        Assert.All(sm.Outcome!.Items, item => Assert.Equal(EquipmentStatus.NotWorn, item.Status));
+        Assert.All(sm.Outcome!.Items, item => Assert.Equal(EquipmentStatus.Unknown, item.Status));
         Assert.Equal(InspectionResultType.CheckRequired, sm.Outcome!.Result);
         Assert.Equal(-1, sm.Outcome!.RepresentativeFrameIndex);
     }
