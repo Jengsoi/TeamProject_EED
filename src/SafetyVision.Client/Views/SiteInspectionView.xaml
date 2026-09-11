@@ -56,13 +56,13 @@
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="{Binding RoiLeft, Converter={StaticResource RatioToStarGridLengthConverter}}"/>
-                                        <ColumnDefinition Width="{Binding RoiRight, Converter={StaticResource RatioToStarGridLengthConverter}}"/>
-                                        <ColumnDefinition Width="1*"/>
+                                        <ColumnDefinition Width="{Binding RoiBoxWidthRatio, Converter={StaticResource RatioToStarGridLengthConverter}}"/>
+                                        <ColumnDefinition Width="{Binding RoiRightMarginRatio, Converter={StaticResource RatioToStarGridLengthConverter}}"/>
                                     </Grid.ColumnDefinitions>
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="{Binding RoiTop, Converter={StaticResource RatioToStarGridLengthConverter}}"/>
-                                        <RowDefinition Height="{Binding RoiBottom, Converter={StaticResource RatioToStarGridLengthConverter}}"/>
-                                        <RowDefinition Height="1*"/>
+                                        <RowDefinition Height="{Binding RoiBoxHeightRatio, Converter={StaticResource RatioToStarGridLengthConverter}}"/>
+                                        <RowDefinition Height="{Binding RoiBottomMarginRatio, Converter={StaticResource RatioToStarGridLengthConverter}}"/>
                                     </Grid.RowDefinitions>
                                     <Rectangle Grid.Column="1" Grid.Row="1" Stroke="#22C55E" StrokeThickness="2" StrokeDashArray="6,3"/>
                                 </Grid>

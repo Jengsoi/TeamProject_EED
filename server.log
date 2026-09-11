@@ -1,0 +1,37 @@
+info: SafetyVision.Server.Inference.OnnxPpeDetector[0]
+      ONNX 모델 로드 완료: C:\Users\user\SafetyVision_work\src\SafetyVision.Server\bin\Debug\net10.0\models\safetyvision_v2_640.onnx, 입력=images, 출력=output0
+info: Program[0]
+      PPE 검출기 준비 완료 (모델: ayushgupta7777/safetyvision-yolov8 v2, 경로: models/safetyvision_v2_640.onnx)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (6ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT GET_LOCK('__safetyvision_EFMigrationsLock', 259200)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (4ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      CREATE TABLE IF NOT EXISTS `__EFMigrationsHistory` (
+          `MigrationId` varchar(150) CHARACTER SET utf8mb4 NOT NULL,
+          `ProductVersion` varchar(32) CHARACTER SET utf8mb4 NOT NULL,
+          CONSTRAINT `PK___EFMigrationsHistory` PRIMARY KEY (`MigrationId`)
+      ) CHARACTER SET=utf8mb4;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (3ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='safetyvision' AND TABLE_NAME='__EFMigrationsHistory';
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (2ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT `MigrationId`, `ProductVersion`
+      FROM `__EFMigrationsHistory`
+      ORDER BY `MigrationId`;
+info: Microsoft.EntityFrameworkCore.Migrations[20405]
+      No migrations were applied. The database is already up to date.
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT RELEASE_LOCK('__safetyvision_EFMigrationsLock')
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT EXISTS (
+          SELECT 1
+          FROM `Users` AS `u`
+          WHERE `u`.`LoginId` = 'admin')
+info: Program[0]
+      MySQL 연결 및 마이그레이션 완료.
+info: SafetyVision.Server.Networking.TcpServerHost[0]
+      TCP 서버 시작: 포트 8910

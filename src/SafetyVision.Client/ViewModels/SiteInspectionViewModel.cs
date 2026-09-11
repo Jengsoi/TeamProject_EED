@@ -51,10 +51,30 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     [ObservableProperty] private string currentTimeText = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
     [ObservableProperty] private string? currentInspectionKey;
 
-    [ObservableProperty] private double roiLeft = 0.20;
-    [ObservableProperty] private double roiTop = 0.05;
-    [ObservableProperty] private double roiRight = 0.80;
-    [ObservableProperty] private double roiBottom = 0.95;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RoiBoxWidthRatio))]
+    private double roiLeft = 0.20;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RoiBoxHeightRatio))]
+    private double roiTop = 0.05;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RoiBoxWidthRatio))]
+    [NotifyPropertyChangedFor(nameof(RoiRightMarginRatio))]
+    private double roiRight = 0.80;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RoiBoxHeightRatio))]
+    [NotifyPropertyChangedFor(nameof(RoiBottomMarginRatio))]
+    private double roiBottom = 0.95;
+
+    // Grid Star 칸 너비/높이는 절대 비율이 아니라 "그 칸의 몫"이어야 하므로,
+    // ROI 박스 칸은 RoiRight-RoiLeft(폭)/RoiBottom-RoiTop(높이)를, 마지막 칸은 나머지(1-RoiRight/1-RoiBottom)를 써야 한다.
+    public double RoiBoxWidthRatio => RoiRight - RoiLeft;
+    public double RoiRightMarginRatio => 1 - RoiRight;
+    public double RoiBoxHeightRatio => RoiBottom - RoiTop;
+    public double RoiBottomMarginRatio => 1 - RoiBottom;
 
     // 실제 카메라 해상도(비율). ROI 오버레이를 영상과 같은 고정 비율 캔버스에 겹쳐 항상 정렬되게 한다.
     [ObservableProperty] private int frameWidth = 1280;
