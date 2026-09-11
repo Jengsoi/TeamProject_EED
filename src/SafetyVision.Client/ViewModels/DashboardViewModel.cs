@@ -56,8 +56,9 @@ public sealed partial class DashboardViewModel(ServerConnection connection) : Ob
         CheckRequired = stats.CheckRequired + stats.Unconfirmed;
         IsEmpty = stats.Total == 0;
 
+        // 대시보드는 한눈에 보이는 요약용이라 4건만 표시한다(전체 목록은 검사 이력 화면에서 확인).
         Recent.Clear();
-        foreach (var r in stats.Recent) Recent.Add(r);
+        foreach (var r in stats.Recent.Take(4)) Recent.Add(r);
 
         var order = new[] { "hardhat", "vest", "mask" };
         var values = order
