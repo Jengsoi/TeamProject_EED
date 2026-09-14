@@ -58,6 +58,8 @@ Start-Service MySQL84
 
 ## 5. 실행
 
+Visual Studio에서는 `SafetyVision.slnx`를 열고 시작 프로필 **SafetyVision (서버 + 클라이언트)**를 선택한 뒤 F5를 누른다. 공유 시작 프로필(`SafetyVision.slnxLaunch`)이 서버를 먼저, 클라이언트를 다음으로 시작한다. Debug 서버는 `appsettings.json`의 `AutoStartLocalMySql`이 true이면 로컬 MySQL이 꺼져 있을 때 자동으로 시작한다. 다른 PC에서는 `LocalMySqlExecutable`과 `LocalMySqlConfigFile` 경로를 해당 설치 위치에 맞게 바꿔야 한다. 서버가 DB 연결을 마치기 전에 로그인을 누르더라도 클라이언트가 최대 약 15초 동안 연결을 재시도한다.
+
 ```powershell
 # 서버
 dotnet run --project src/SafetyVision.Server

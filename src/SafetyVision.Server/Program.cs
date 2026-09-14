@@ -7,6 +7,7 @@ using SafetyVision.Core.Configuration;
 using SafetyVision.Data;
 using SafetyVision.Data.Seeding;
 using SafetyVision.Data.Services;
+using SafetyVision.Server;
 using SafetyVision.Server.Inference;
 using SafetyVision.Server.Networking;
 
@@ -45,6 +46,14 @@ using var app = builder.Build();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 var tcpHost = app.Services.GetRequiredService<TcpServerHost>();
 var detector = app.Services.GetRequiredService<IPpeDetector>();
+
+#if DEBUG
+if (builder.Configuration.GetValue<bool>("AutoStartLocalMySql"))
+    await LocalMySqlStarter.EnsureStartedAsync(
+        builder.Configuration["LocalMySqlExecutable"] ?? "",
+        builder.Configuration["LocalMySqlConfigFile"] ?? "",
+        logger);
+#endif
 
 if (!detector.IsAvailable)
     logger.LogWarning("PPE 검출기를 사용할 수 없습니다: {Reason}", detector.UnavailableReason);
