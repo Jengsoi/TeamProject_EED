@@ -4,8 +4,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenCvSharp;
-using OpenCvSharp.WpfExtensions;
+using SafetyVision.Client.Camera;
 using SafetyVision.Client.Config;
 using SafetyVision.Client.Models;
 using SafetyVision.Client.Networking;
@@ -20,10 +19,7 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     private readonly ServerConnection _connection;
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _clockTimer;
-
-    private VideoCapture? _capture;
-    private Thread? _captureThread;
-    private volatile bool _captureRunning;
+    private readonly ICameraService _camera;
     private int _reportedWidth;
     private int _reportedHeight;
     private readonly SemaphoreSlim _frameSendGate = new(1, 1);
@@ -31,12 +27,20 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     private int _reconnectRunning;
     private bool _isEntered;
 
-    public SiteInspectionViewModel(ServerConnection connection)
+    public SiteInspectionViewModel(ServerConnection connection) : this(connection, new OpenCvCameraService())
+    {
+    }
+
+    internal SiteInspectionViewModel(ServerConnection connection, ICameraService camera)
     {
         _connection = connection;
+        _camera = camera;
         _dispatcher = Dispatcher.CurrentDispatcher;
         _clockTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
         _clockTimer.Tick += (_, _) => CurrentTimeText = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        _camera.PreviewReady += preview => _dispatcher.BeginInvoke(() => CameraPreview = preview);
+        _camera.FrameReady += (meta, jpeg) => _ = SendFrameSafeAsync(meta, jpeg);
+        _camera.ConnectionLost += () => _ = ReportCameraFailureAsync();
     }
 
     [ObservableProperty] private BitmapSource? cameraPreview;
@@ -126,26 +130,19 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
         _connection.ErrorReceived += OnErrorReceived;
         _connection.Disconnected += OnDisconnected;
 
-        _capture = new VideoCapture(ClientSettings.CameraIndex);
-        if (!_capture.IsOpened())
+        if (!_camera.Start())
         {
             CameraErrorMessage = "카메라를 사용할 수 없습니다. 연결을 확인해 주세요.";
             try { await _connection.SendAsync(MessageTypes.InspectionSessionEnd, new InspectionSessionEndPayload("camera_error")); }
             catch (Exception) { /* 세션이 이미 없으면 무시 */ }
-            _capture.Dispose();
-            _capture = null;
             UnsubscribeConnectionEvents();
             _clockTimer.Stop();
             _isEntered = false;
             return;
         }
 
-        _capture.Set(VideoCaptureProperties.FrameWidth, ClientSettings.CameraWidth);
-        _capture.Set(VideoCaptureProperties.FrameHeight, ClientSettings.CameraHeight);
-        _reportedWidth = (int)_capture.Get(VideoCaptureProperties.FrameWidth);
-        _reportedHeight = (int)_capture.Get(VideoCaptureProperties.FrameHeight);
-        if (_reportedWidth <= 0) _reportedWidth = ClientSettings.CameraWidth;
-        if (_reportedHeight <= 0) _reportedHeight = ClientSettings.CameraHeight;
+        _reportedWidth = _camera.Width;
+        _reportedHeight = _camera.Height;
 
         // 미리보기 Viewbox가 실제 카메라 종횡비를 그대로 따라가도록 갱신 (ROI 오버레이 정합성 유지).
         FrameWidth = _reportedWidth;
@@ -153,9 +150,6 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
 
         await StartSessionAsync();
 
-        _captureRunning = true;
-        _captureThread = new Thread(CaptureLoop) { IsBackground = true };
-        _captureThread.Start();
     }
 
     private async Task StartSessionAsync()
@@ -189,78 +183,12 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
         if (!_isEntered) return;
         _isEntered = false;
         _clockTimer.Stop();
-        _captureRunning = false;
-        var capture = _capture;
-        var captureThread = _captureThread;
-        _capture = null;
-        bool captureStopped = captureThread?.Join(2000) ?? true;
-        if (captureStopped)
-        {
-            capture?.Release();
-            capture?.Dispose();
-        }
-        else if (captureThread is not null && capture is not null)
-        {
-            _ = Task.Run(() =>
-            {
-                captureThread.Join();
-                capture.Release();
-                capture.Dispose();
-            });
-        }
-        _captureThread = null;
+        await _camera.StopAsync();
 
         UnsubscribeConnectionEvents();
 
         try { await _connection.SendAsync(MessageTypes.InspectionSessionEnd, new InspectionSessionEndPayload(null)); }
         catch (Exception) { /* 연결이 이미 끊겼으면 무시 */ }
-    }
-
-    private void CaptureLoop()
-    {
-        var capture = _capture;
-        if (capture is null) return;
-        using var mat = new Mat();
-        var sendInterval = TimeSpan.FromSeconds(1.0 / ClientSettings.MaxFrameSendFps);
-        var lastSend = DateTime.MinValue;
-        long seq = 0;
-        int consecutiveReadFailures = 0;
-
-        while (_captureRunning)
-        {
-            if (!capture.Read(mat) || mat.Empty())
-            {
-                Thread.Sleep(15);
-                if (++consecutiveReadFailures >= 100)
-                {
-                    _captureRunning = false;
-                    _ = ReportCameraFailureAsync();
-                }
-                continue;
-            }
-            consecutiveReadFailures = 0;
-
-            try
-            {
-                var preview = mat.ToBitmapSource();
-                preview.Freeze();
-                _dispatcher.BeginInvoke(() => CameraPreview = preview);
-            }
-            catch (Exception)
-            {
-                // 프레임 변환 실패는 다음 프레임에서 재시도한다.
-            }
-
-            var now = DateTime.UtcNow;
-            if (now - lastSend >= sendInterval)
-            {
-                lastSend = now;
-                seq++;
-                Cv2.ImEncode(".jpg", mat, out var jpegBytes, new ImageEncodingParam(ImwriteFlags.JpegQuality, ClientSettings.FrameJpegQuality));
-                var meta = new FrameMetaPayload(seq, DateTimeOffset.UtcNow, mat.Width, mat.Height);
-                _ = SendFrameSafeAsync(meta, jpegBytes);
-            }
-        }
     }
 
     private async Task SendFrameSafeAsync(FrameMetaPayload meta, byte[] jpeg)

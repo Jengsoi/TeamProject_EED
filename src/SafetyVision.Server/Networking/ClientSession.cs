@@ -25,14 +25,14 @@ public sealed class ClientSession(
     ILogger<ClientSession> logger)
 {
     private readonly NetworkStream _stream = client.GetStream();
-    private readonly InspectionStateMachine _stateMachine = new(options);
+    private readonly ClientQueryHandler _queries = new(scopeFactory);
+    private readonly InspectionSessionContext _inspection = new(options);
     private readonly SemaphoreSlim _writeLock = new(1, 1);
-    // _stateMachine/_lastDetection/_lastFrameJpeg/_analysisFrames/_pendingSave는 원래 단일 수신 루프에서만
+    // _inspection.StateMachine/_inspection.LastDetection/_inspection.LastFrameJpeg/_inspection.AnalysisFrames/_inspection.PendingSave는 원래 단일 수신 루프에서만
     // 건드렸지만, 프레임 처리를 별도 백그라운드 루프로 분리하면서(아래 참고) 다른 요청 처리(재시도 등)와
     // 동시에 접근될 수 있다. 이 락으로 두 쪽 모두를 보호한다.
     private readonly SemaphoreSlim _stateLock = new(1, 1);
     private readonly Stopwatch _clock = Stopwatch.StartNew();
-    private readonly List<AnalysisFrameRecord> _analysisFrames = [];
 
     // 프레임 처리(추론)가 전송 속도를 못 따라가도 지연이 계속 누적되지 않도록, 항상 "가장 최근 프레임 1개"만
     // 유지한다. 처리 중에 새 프레임이 도착하면 처리 대기 중이던 이전 프레임은 버려진다(DropOldest).
@@ -44,20 +44,7 @@ public sealed class ClientSession(
             SingleWriter = true,
         });
 
-    private DetectionFrame? _lastDetection;
-    private byte[]? _lastFrameJpeg;
-    private SaveInspectionRequest? _pendingSave;
-    private string _cameraName = "CAM 01";
     private bool _isAuthenticated;
-    private (int Width, int Height)? _loggedResolution;
-    private double _lastDiagFrameSaveAt = double.NegativeInfinity;
-    private double? _lastProcessedAt; // [TEMP-DIAG] 프레임 처리 간격 실측용. 원인 파악 후 제거할 것.
-
-    // [TEMP-DIAG] 실제 카메라 원본 프레임을 화면 녹화 없이 직접 확인하기 위한 임시 저장. 원인 파악 후 제거할 것.
-    private const string DiagFrameDir = @"C:\Users\user\Downloads\SafetyVision\SafetyVision\diagnostics\frames";
-
-    private sealed record AnalysisFrameRecord(byte[] Jpeg, IReadOnlyList<DetectedBox> Boxes, double PersonConfidence);
-
     public async Task RunAsync(CancellationToken serverShutdownToken)
     {
         var frameProcessingTask = ProcessFramesAsync(serverShutdownToken);
@@ -88,7 +75,7 @@ public sealed class ClientSession(
             catch (Exception) { /* 프레임 처리 루프 종료 중 예외는 연결 종료 처리에 영향 주지 않는다 */ }
 
             await _stateLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
-            try { _stateMachine.Cancel(CancelReason.ConnectionClosed, NowSeconds()); }
+            try { _inspection.StateMachine.Cancel(CancelReason.ConnectionClosed, NowSeconds()); }
             finally { _stateLock.Release(); }
 
             try { client.Close(); } catch (Exception) { /* 연결 정리 과정의 예외는 무시한다 */ }
@@ -143,47 +130,20 @@ public sealed class ClientSession(
     {
         _isAuthenticated = false;
         await _stateLock.WaitAsync(ct).ConfigureAwait(false);
-        try { _stateMachine.Cancel(CancelReason.LoggedOut, NowSeconds()); }
+        try { _inspection.StateMachine.Cancel(CancelReason.LoggedOut, NowSeconds()); }
         finally { _stateLock.Release(); }
         await SendAsync(MessageTypes.LogoutResponse, envelope.CorrelationId, new LogoutResponsePayload(true), ct).ConfigureAwait(false);
     }
 
     private async Task HandleDashboardStatsAsync(Envelope envelope, CancellationToken ct)
     {
-        using var scope = scopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<DashboardQueryService>();
-        var stats = await svc.GetStatsAsync(ct).ConfigureAwait(false);
-
-        var payload = new DashboardStatsResponsePayload(
-            stats.Total, stats.Normal, stats.CheckRequired, stats.Unconfirmed,
-            stats.EquipmentRates.Select(r => new EquipmentRatePayload(EquipmentClassMap.ToDbCode(r.Code), r.WornRatio)).ToList(),
-            stats.Recent.Select(r => new RecentInspectionPayload(
-                r.Id, new DateTimeOffset(DateTime.SpecifyKind(r.InspectedAtUtc, DateTimeKind.Utc)),
-                string.IsNullOrEmpty(r.CameraName) ? "CAM 01" : r.CameraName,
-                r.Hardhat, r.Vest, r.Mask, r.Result, r.HasImage)).ToList());
-
+        var payload = await _queries.GetDashboardAsync(ct).ConfigureAwait(false);
         await SendAsync(MessageTypes.DashboardStatsResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
     }
 
     private async Task HandleStatisticsAsync(Envelope envelope, CancellationToken ct)
     {
-        using var scope = scopeFactory.CreateScope();
-        var dashboardSvc = scope.ServiceProvider.GetRequiredService<DashboardQueryService>();
-        var statsSvc = scope.ServiceProvider.GetRequiredService<StatisticsQueryService>();
-
-        var stats = await dashboardSvc.GetStatsAsync(ct).ConfigureAwait(false);
-        var breakdown = await statsSvc.GetEquipmentBreakdownAsync(ct).ConfigureAwait(false);
-        var dailyTrend = await statsSvc.GetDailyTrendAsync(14, ct).ConfigureAwait(false);
-        var monthlyTrend = await statsSvc.GetMonthlyTrendAsync(6, ct).ConfigureAwait(false);
-        var cameraBreakdown = await statsSvc.GetCameraBreakdownAsync(ct).ConfigureAwait(false);
-
-        var payload = new StatisticsResponsePayload(
-            stats.Total, stats.Normal, stats.CheckRequired + stats.Unconfirmed,
-            breakdown.Select(b => new EquipmentBreakdownPayload(EquipmentClassMap.ToDbCode(b.Code), b.Worn, b.NotWorn, b.Unknown)).ToList(),
-            dailyTrend.Select(d => new DailyTrendPointPayload(d.Date, d.Normal, d.CheckRequired)).ToList(),
-            monthlyTrend.Select(m => new MonthlyTrendPointPayload(m.Year, m.Month, m.Normal, m.CheckRequired)).ToList(),
-            cameraBreakdown.Select(c => new CameraBreakdownPayload(c.CameraName, c.Total, c.Normal, c.CheckRequired)).ToList());
-
+        var payload = await _queries.GetStatisticsAsync(ct).ConfigureAwait(false);
         await SendAsync(MessageTypes.StatisticsResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
     }
 
@@ -191,7 +151,7 @@ public sealed class ClientSession(
     {
         var req = envelope.DeserializePayload<InspectionSessionStartPayload>();
         if (!string.IsNullOrWhiteSpace(req.CameraName))
-            _cameraName = req.CameraName;
+            _inspection.CameraName = req.CameraName;
 
         var payload = new InspectionSessionStartedPayload(true, null, options.RoiLeft, options.RoiTop, options.RoiRight, options.RoiBottom);
         await SendAsync(MessageTypes.InspectionSessionStarted, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
@@ -202,10 +162,10 @@ public sealed class ClientSession(
         await _stateLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            _stateMachine.Cancel(CancelReason.ScreenLeft, NowSeconds());
-            _analysisFrames.Clear();
-            _lastFrameJpeg = null;
-            _lastDetection = null;
+            _inspection.StateMachine.Cancel(CancelReason.ScreenLeft, NowSeconds());
+            _inspection.AnalysisFrames.Clear();
+            _inspection.LastFrameJpeg = null;
+            _inspection.LastDetection = null;
         }
         finally { _stateLock.Release(); }
     }
@@ -222,7 +182,7 @@ public sealed class ClientSession(
         }
 
         await _stateLock.WaitAsync(ct).ConfigureAwait(false);
-        try { _lastFrameJpeg = imageBytes; }
+        try { _inspection.LastFrameJpeg = imageBytes; }
         finally { _stateLock.Release(); }
 
         if (!detector.IsAvailable)
@@ -264,20 +224,10 @@ public sealed class ClientSession(
 
     private async Task ProcessFrameAsync(Envelope envelope, byte[] imageBytes, CancellationToken ct)
     {
-        // [TEMP-DIAG] 프레임 처리 간격 및 추론 소요 시간 실측용. 원인 파악 후 제거할 것.
-        double diagStart = NowSeconds();
-        double diagIntervalMs = _lastProcessedAt is double prev ? (diagStart - prev) * 1000 : -1;
-        _lastProcessedAt = diagStart;
-
         DetectionFrame detection;
         try
         {
             detection = detector.Detect(imageBytes);
-            // [TEMP-DIAG] 원인 파악 후 제거할 것.
-            double diagDetectMs = (NowSeconds() - diagStart) * 1000;
-            logger.LogInformation(
-                "[TEMP-DIAG] 프레임 간격={IntervalMs:F0}ms 추론소요={DetectMs:F0}ms",
-                diagIntervalMs, diagDetectMs);
         }
         catch (Exception ex)
         {
@@ -285,41 +235,13 @@ public sealed class ClientSession(
             await _stateLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                _stateMachine.Cancel(CancelReason.InferenceError, NowSeconds());
-                _analysisFrames.Clear();
+                _inspection.StateMachine.Cancel(CancelReason.InferenceError, NowSeconds());
+                _inspection.AnalysisFrames.Clear();
             }
             finally { _stateLock.Release(); }
             await TrySendErrorAsync(envelope.CorrelationId, ErrorCodes.InferenceError, "AI 분석 중 오류가 발생했습니다. 화면에 다시 진입해 주세요.", ct).ConfigureAwait(false);
             await SendStateAsync(ct).ConfigureAwait(false);
             return;
-        }
-
-        // [TEMP-DIAG] 실제 캡처 해상도 확인용. 해상도가 바뀔 때마다(세션당 보통 1회) 한 번만 남긴다.
-        // 원인 파악 후 제거할 것.
-        var currentResolution = (detection.Width, detection.Height);
-        if (_loggedResolution != currentResolution)
-        {
-            _loggedResolution = currentResolution;
-            logger.LogInformation(
-                "[TEMP-DIAG] 실제 수신 프레임 해상도={Width}x{Height}, JPEG 크기={Bytes} bytes",
-                detection.Width, detection.Height, imageBytes.Length);
-        }
-
-        // [TEMP-DIAG] 2초마다 원본 프레임(화면 녹화 아님, 서버가 실제로 받은 그대로)을 디스크에 저장. 원인 파악 후 제거할 것.
-        double nowForDiag = NowSeconds();
-        if (nowForDiag - _lastDiagFrameSaveAt >= 2.0)
-        {
-            _lastDiagFrameSaveAt = nowForDiag;
-            try
-            {
-                Directory.CreateDirectory(DiagFrameDir);
-                string diagPath = Path.Combine(DiagFrameDir, $"frame_{DateTime.Now:HHmmss_fff}.jpg");
-                File.WriteAllBytes(diagPath, imageBytes);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "[TEMP-DIAG] 진단용 프레임 저장 실패");
-            }
         }
 
         var eval = FrameAnalyzer.Evaluate(detection.Boxes, detection.Width, detection.Height, options);
@@ -330,39 +252,23 @@ public sealed class ClientSession(
             detection.Boxes.Select(x =>
                 $"{x.Class}({x.Confidence:F2})")));
 
-        // [TEMP-DIAG] 새 모델(896) 적용 후 재확인용. 원인 파악 후 제거할 것.
-        var personDiag = detection.Boxes
-            .Where(b => b.Class == DetectedClass.Person)
-            .Select(p =>
-            {
-                double cxPct = p.CenterX / detection.Width * 100;
-                double cyPct = p.CenterY / detection.Height * 100;
-                double hPct = p.Height / detection.Height * 100;
-                bool inRoi = RoiEvaluator.IsCenterInRoi(p, detection.Width, detection.Height, options);
-                bool meetsHeight = RoiEvaluator.MeetsMinHeight(p, detection.Height, options);
-                return $"conf={p.Confidence:F2} cx%={cxPct:F1} cy%={cyPct:F1} h%={hPct:F1} inRoi={inRoi} meetsHeight={meetsHeight}";
-            });
-        logger.LogInformation(
-            "[TEMP-DIAG] condition={Condition} persons=[{Persons}]",
-            eval.Condition, string.Join(" | ", personDiag));
-
         bool justCompleted;
         await _stateLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            _lastDetection = detection;
-            bool wasInspecting = _stateMachine.State == InspectionState.Inspecting;
-            int beforeCount = _stateMachine.FrameVotes.Count;
-            int beforeGeneration = _stateMachine.Generation;
-            justCompleted = _stateMachine.ProcessFrame(eval, NowSeconds());
+            _inspection.LastDetection = detection;
+            bool wasInspecting = _inspection.StateMachine.State == InspectionState.Inspecting;
+            int beforeCount = _inspection.StateMachine.FrameVotes.Count;
+            int beforeGeneration = _inspection.StateMachine.Generation;
+            justCompleted = _inspection.StateMachine.ProcessFrame(eval, NowSeconds());
 
-            if (_stateMachine.Generation != beforeGeneration)
-                _analysisFrames.Clear();
+            if (_inspection.StateMachine.Generation != beforeGeneration)
+                _inspection.AnalysisFrames.Clear();
 
-            if (wasInspecting && eval.Condition == PersonRoiCondition.Qualified && _stateMachine.FrameVotes.Count > beforeCount)
+            if (wasInspecting && eval.Condition == PersonRoiCondition.Qualified && _inspection.StateMachine.FrameVotes.Count > beforeCount)
             {
                 var target = FrameAnalyzer.FindSingleRoiPerson(detection.Boxes, detection.Width, detection.Height, options);
-                _analysisFrames.Add(new AnalysisFrameRecord(imageBytes, detection.Boxes, target?.Confidence ?? 0));
+                _inspection.AnalysisFrames.Add(new AnalysisFrameRecord(imageBytes, detection.Boxes, target?.Confidence ?? 0));
             }
         }
         finally { _stateLock.Release(); }
@@ -378,11 +284,11 @@ public sealed class ClientSession(
         await _stateLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_lastDetection is not null)
+            if (_inspection.LastDetection is not null)
             {
-                var eval = FrameAnalyzer.Evaluate(_lastDetection.Boxes, _lastDetection.Width, _lastDetection.Height, options);
-                if (_stateMachine.TryRetry(eval, NowSeconds()))
-                    _analysisFrames.Clear();
+                var eval = FrameAnalyzer.Evaluate(_inspection.LastDetection.Boxes, _inspection.LastDetection.Width, _inspection.LastDetection.Height, options);
+                if (_inspection.StateMachine.TryRetry(eval, NowSeconds()))
+                    _inspection.AnalysisFrames.Clear();
             }
         }
         finally { _stateLock.Release(); }
@@ -398,9 +304,9 @@ public sealed class ClientSession(
         try
         {
             canRetry = Guid.TryParse(req.InspectionKey, out var key)
-                && key == _stateMachine.InspectionKey
-                && _pendingSave is not null
-                && _stateMachine.TryRetrySave();
+                && key == _inspection.StateMachine.InspectionKey
+                && _inspection.PendingSave is not null
+                && _inspection.StateMachine.TryRetrySave();
         }
         finally { _stateLock.Release(); }
 
@@ -417,53 +323,23 @@ public sealed class ClientSession(
     private async Task HandleHistoryPageAsync(Envelope envelope, CancellationToken ct)
     {
         var req = envelope.DeserializePayload<HistoryPageRequestPayload>();
-        using var scope = scopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<HistoryQueryService>();
-        var page = await svc.GetPageAsync(req.Page, req.FromUtc?.UtcDateTime, req.ToUtc?.UtcDateTime, req.ResultFilter, ct).ConfigureAwait(false);
-
-        var payload = new HistoryPageResponsePayload(page.Page, page.TotalPages, page.TotalCount,
-            page.Rows.Select(r => new HistoryRowPayload(
-                r.Id, new DateTimeOffset(DateTime.SpecifyKind(r.InspectedAtUtc, DateTimeKind.Utc)),
-                r.Hardhat, r.Vest, r.Mask, r.Result)).ToList());
-
+        var payload = await _queries.GetHistoryAsync(req, ct).ConfigureAwait(false);
         await SendAsync(MessageTypes.HistoryPageResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
     }
 
     private async Task HandleInspectionDetailAsync(Envelope envelope, CancellationToken ct)
     {
         var req = envelope.DeserializePayload<InspectionDetailRequestPayload>();
-        using var scope = scopeFactory.CreateScope();
-        var history = scope.ServiceProvider.GetRequiredService<HistoryQueryService>();
-        var saveService = scope.ServiceProvider.GetRequiredService<InspectionSaveService>();
-
-        var inspection = await history.GetDetailAsync(req.Id, ct).ConfigureAwait(false);
-        if (inspection is null)
+        var detail = await _queries.GetInspectionDetailAsync(req.Id, ct).ConfigureAwait(false);
+        if (detail is null)
         {
             await TrySendErrorAsync(envelope.CorrelationId, ErrorCodes.InvalidRequest, "검사 기록을 찾을 수 없습니다.", ct).ConfigureAwait(false);
             return;
         }
 
-        byte[]? imageBytes = null;
-        string? missingMessage = "이미지 파일을 찾을 수 없습니다.";
-        if (!string.IsNullOrEmpty(inspection.ImagePath))
-        {
-            var fullPath = saveService.ResolveImageFullPath(inspection.ImagePath);
-            if (File.Exists(fullPath))
-            {
-                imageBytes = await File.ReadAllBytesAsync(fullPath, ct).ConfigureAwait(false);
-                missingMessage = null;
-            }
-        }
-
-        var items = inspection.Items
-            .Select(i => new EquipmentResultPayload(i.EquipmentCode, i.Status, i.Score))
-            .ToList();
-        var payload = new InspectionDetailResponsePayload(
-            inspection.Id, new DateTimeOffset(DateTime.SpecifyKind(inspection.InspectedAt, DateTimeKind.Utc)),
-            items, inspection.Result, imageBytes is not null, missingMessage);
-
         await SendWithOptionalImageAsync(
-            MessageTypes.InspectionDetailResponse, envelope.CorrelationId, payload, imageBytes, ct).ConfigureAwait(false);
+            MessageTypes.InspectionDetailResponse, envelope.CorrelationId,
+            detail.Payload, detail.Image, ct).ConfigureAwait(false);
     }
 
     private async Task OnInspectionCompletedAsync(CancellationToken ct)
@@ -476,26 +352,26 @@ public sealed class ClientSession(
         await _stateLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            outcome = _stateMachine.Outcome!;
-            inspectionKey = _stateMachine.InspectionKey;
+            outcome = _inspection.StateMachine.Outcome!;
+            inspectionKey = _inspection.StateMachine.InspectionKey;
             personConfidence = null;
             representativeJpeg = null;
 
-            if (outcome.RepresentativeFrameIndex >= 0 && outcome.RepresentativeFrameIndex < _analysisFrames.Count)
+            if (outcome.RepresentativeFrameIndex >= 0 && outcome.RepresentativeFrameIndex < _inspection.AnalysisFrames.Count)
             {
-                var frame = _analysisFrames[outcome.RepresentativeFrameIndex];
+                var frame = _inspection.AnalysisFrames[outcome.RepresentativeFrameIndex];
                 representativeJpeg = ImageAnnotator.DrawBoxes(frame.Jpeg, frame.Boxes, options.JpegQuality);
                 personConfidence = frame.PersonConfidence;
             }
-            else if (_lastFrameJpeg is not null)
+            else if (_inspection.LastFrameJpeg is not null)
             {
-                representativeJpeg = _lastFrameJpeg; // N=0: 마지막 프레임을 박스 없이 사용
+                representativeJpeg = _inspection.LastFrameJpeg; // N=0: 마지막 프레임을 박스 없이 사용
             }
 
-            _pendingSave = new SaveInspectionRequest(
+            _inspection.PendingSave = new SaveInspectionRequest(
                 inspectionKey, DateTime.UtcNow, outcome.Result, outcome.Items,
-                representativeJpeg, personConfidence, _cameraName, options.ModelName, options.ModelVersion);
-            _analysisFrames.Clear();
+                representativeJpeg, personConfidence, _inspection.CameraName, options.ModelName, options.ModelVersion);
+            _inspection.AnalysisFrames.Clear();
         }
         finally { _stateLock.Release(); }
 
@@ -504,7 +380,7 @@ public sealed class ClientSession(
 
         string saveState;
         await _stateLock.WaitAsync(ct).ConfigureAwait(false);
-        try { saveState = SaveStateCode(_stateMachine.SaveState); }
+        try { saveState = SaveStateCode(_inspection.StateMachine.SaveState); }
         finally { _stateLock.Release(); }
 
         await SendResultMessageAsync(inspectionKey, outcome, representativeJpeg, saveState, ct).ConfigureAwait(false);
@@ -514,7 +390,7 @@ public sealed class ClientSession(
     {
         SaveInspectionRequest? pending;
         await _stateLock.WaitAsync(ct).ConfigureAwait(false);
-        try { pending = _pendingSave; }
+        try { pending = _inspection.PendingSave; }
         finally { _stateLock.Release(); }
 
         if (pending is null) return;
@@ -526,8 +402,8 @@ public sealed class ClientSession(
         await _stateLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (result.Outcome == SaveOutcome.Success) _stateMachine.MarkSaveSucceeded();
-            else _stateMachine.MarkSaveFailed();
+            if (result.Outcome == SaveOutcome.Success) _inspection.StateMachine.MarkSaveSucceeded();
+            else _inspection.StateMachine.MarkSaveFailed();
         }
         finally { _stateLock.Release(); }
 
@@ -559,17 +435,12 @@ public sealed class ClientSession(
 
     private async Task SendWithOptionalImageAsync<T>(string type, Guid correlationId, T payload, byte[]? image, CancellationToken ct)
     {
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        await WriteLockedAsync(async () =>
         {
             await ProtocolMessage.SendAsync(_stream, type, correlationId, payload, ct).ConfigureAwait(false);
             if (image is not null)
                 await ProtocolMessage.SendImageAsync(_stream, image, ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
+        }, ct).ConfigureAwait(false);
     }
 
     private async Task SendStateAsync(CancellationToken ct)
@@ -580,9 +451,9 @@ public sealed class ClientSession(
         await _stateLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            state = _stateMachine.State;
-            guidance = _stateMachine.GuidanceMessage;
-            saveState = _stateMachine.SaveState;
+            state = _inspection.StateMachine.State;
+            guidance = _inspection.StateMachine.GuidanceMessage;
+            saveState = _inspection.StateMachine.SaveState;
         }
         finally { _stateLock.Release(); }
 
@@ -594,28 +465,15 @@ public sealed class ClientSession(
 
     private async Task SendAsync<T>(string type, Guid correlationId, T payload, CancellationToken ct)
     {
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            await ProtocolMessage.SendAsync(_stream, type, correlationId, payload, ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
+        await WriteLockedAsync(
+            () => ProtocolMessage.SendAsync(_stream, type, correlationId, payload, ct), ct).ConfigureAwait(false);
     }
 
-    private async Task SendImageAsync(byte[] jpeg, CancellationToken ct)
+    private async Task WriteLockedAsync(Func<Task> write, CancellationToken ct)
     {
         await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            await ProtocolMessage.SendImageAsync(_stream, jpeg, ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
+        try { await write().ConfigureAwait(false); }
+        finally { _writeLock.Release(); }
     }
 
     private async Task TrySendErrorAsync(Guid correlationId, string code, string message, CancellationToken ct)

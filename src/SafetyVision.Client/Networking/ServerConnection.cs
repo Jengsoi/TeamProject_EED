@@ -84,15 +84,8 @@ public sealed class ServerConnection(string host, int port) : IDisposable
 
         try
         {
-            await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-            try
-            {
-                await ProtocolMessage.SendAsync(_stream, type, correlationId, payload, ct).ConfigureAwait(false);
-            }
-            finally
-            {
-                _writeLock.Release();
-            }
+            await WriteLockedAsync(
+                stream => ProtocolMessage.SendAsync(stream, type, correlationId, payload, ct), ct).ConfigureAwait(false);
         }
         catch
         {
@@ -119,31 +112,27 @@ public sealed class ServerConnection(string host, int port) : IDisposable
     {
         if (!IsConnected || _stream is null) return;
         var correlationId = Guid.NewGuid();
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            await ProtocolMessage.SendAsync(_stream, type, correlationId, payload, ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
+        await WriteLockedAsync(
+            stream => ProtocolMessage.SendAsync(stream, type, correlationId, payload, ct), ct).ConfigureAwait(false);
     }
 
     public async Task SendFrameAsync(FrameMetaPayload meta, byte[] jpegBytes, CancellationToken ct = default)
     {
         if (!IsConnected || _stream is null) return;
         var correlationId = Guid.NewGuid();
+        await WriteLockedAsync(async stream =>
+        {
+            await ProtocolMessage.SendAsync(stream, MessageTypes.FrameMeta, correlationId, meta, ct).ConfigureAwait(false);
+            await ProtocolMessage.SendImageAsync(stream, jpegBytes, ct).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+    }
+
+    private async Task WriteLockedAsync(Func<NetworkStream, Task> write, CancellationToken ct)
+    {
+        var stream = _stream ?? throw new IOException("서버에 연결되어 있지 않습니다.");
         await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            await ProtocolMessage.SendAsync(_stream, MessageTypes.FrameMeta, correlationId, meta, ct).ConfigureAwait(false);
-            await ProtocolMessage.SendImageAsync(_stream, jpegBytes, ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
+        try { await write(stream).ConfigureAwait(false); }
+        finally { _writeLock.Release(); }
     }
 
     private async Task ReadLoopAsync(NetworkStream stream, long generation, CancellationToken ct)
