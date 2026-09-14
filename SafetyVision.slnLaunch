@@ -1,0 +1,15 @@
+[
+  {
+    "Name": "SafetyVision (서버 + 클라이언트)",
+    "Projects": [
+      {
+        "Path": "src\\SafetyVision.Server\\SafetyVision.Server.csproj",
+        "Action": "Start"
+      },
+      {
+        "Path": "src\\SafetyVision.Client\\SafetyVision.Client.csproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]
