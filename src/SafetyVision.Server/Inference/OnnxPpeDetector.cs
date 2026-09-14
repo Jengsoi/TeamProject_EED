@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using OpenCvSharp;
+using SafetyVision.Core.Analysis;
 using SafetyVision.Core.Configuration;
 using SafetyVision.Core.Domain;
 
@@ -273,6 +274,27 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
         return new DetectedBox(detectedClass, x, y, w, h, confidence);
     }
 
+    private int AdjustFaceTopForHardhat(
+        DetectedBox person,
+        IReadOnlyList<DetectedBox> ppeBoxes,
+        int detectedFaceTop)
+    {
+        var hardhat = ppeBoxes
+            .Where(b => b.Class == DetectedClass.Hardhat
+                && PpeAssociationRules.IsCandidate(DetectedClass.Hardhat, person, b, _options))
+            .OrderByDescending(b => b.Confidence)
+            .FirstOrDefault();
+
+        if (hardhat == default)
+            return detectedFaceTop;
+
+        // 흰색 안전모가 피부색 마스크에 걸리면 FindFaceTop이 헬멧 위쪽을 얼굴로 오인한다.
+        // 검출된 안전모의 아래쪽 25% 지점부터 실제 이마/눈 영역이 시작된다고 보고
+        // 마스크 분류 크롭이 안전모 본체를 포함하지 않도록 시작점을 아래로 내린다.
+        int belowHardhatShell = (int)(hardhat.Y + hardhat.Height * 0.75);
+        return Math.Max(detectedFaceTop, belowHardhatShell);
+    }
+
     public DetectionFrame Detect(ReadOnlySpan<byte> jpegBytes)
     {
         if (!IsAvailable || _session is null)
@@ -312,6 +334,7 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
         foreach (var person in personBoxes)
         {
             int faceTop = FindFaceTop(source, person);
+            faceTop = AdjustFaceTopForHardhat(person, ppeBoxes, faceTop);
             var maskBox = ClassifyMask(source, person, faceTop);
             if (maskBox is not null) boxes.Add(maskBox.Value);
         }
