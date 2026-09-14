@@ -240,7 +240,9 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
     {
         if (_maskSession is null) return null;
 
-        double headTop = Math.Max(person.Y, faceTop);
+        // 눈 위쪽에서 시작하던 크롭을 코·입·턱 방향으로 조금 내려 마스크 착용 부위를 중심에 둔다.
+        double headTop = Math.Max(person.Y, faceTop)
+            + _options.MaskClassifierTopOffsetRatio * person.Height;
         double cropHalfWidth = _options.MaskClassifierCropHalfWidthRatio * person.Width;
         double cx = faceCenterX;
         int x = (int)Math.Clamp(cx - cropHalfWidth, 0, source.Width);

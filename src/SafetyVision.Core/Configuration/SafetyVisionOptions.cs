@@ -28,6 +28,7 @@ public sealed class SafetyVisionOptions
     // 만큼 잘라 분류기에 넣고, Hardhat/SafetyVest와 동일한 방식(합성 DetectedBox)으로 FrameAnalyzer에 넘긴다.
     public string MaskModelPath { get; set; } = "models/mask_classifier.onnx";
     public int MaskModelInputSize { get; set; } = 224;
+    public double MaskClassifierTopOffsetRatio { get; set; } = 0.035;
 
     // 안전모를 쓰면 사람 박스의 맨 위 지점이 헬멧 꼭대기까지 올라가서, 이 비율을 person.Y 기준으로만
     // 늘리면(예: 0.30) 안전모 없을 때는 목/어깨까지 크롭에 포함되어 분류기가 오히려 마스크로 오판했다
@@ -90,6 +91,7 @@ public sealed class SafetyVisionOptions
         if (PersonModelInputSize <= 0 || PersonModelInputSize % 32 != 0) yield return "PersonModelInputSize는 32의 배수인 양수여야 합니다.";
         if (PersonDetectionConfidence is < 0 or > 1) yield return "PersonDetectionConfidence는 0~1 사이여야 합니다.";
         if (MaskModelInputSize <= 0) yield return "MaskModelInputSize는 양수여야 합니다.";
+        if (MaskClassifierTopOffsetRatio is < 0 or > 0.15) yield return "MaskClassifierTopOffsetRatio는 0~0.15 사이여야 합니다.";
         if (MaskClassifierCropBottomRatio <= 0) yield return "MaskClassifierCropBottomRatio는 양수여야 합니다.";
         if (MaskClassifierCropHalfWidthRatio <= 0) yield return "MaskClassifierCropHalfWidthRatio는 양수여야 합니다.";
         if (MaskClassifierConfidence is <= 0.5 or > 1) yield return "MaskClassifierConfidence는 0.5 초과 1 이하여야 합니다.";
