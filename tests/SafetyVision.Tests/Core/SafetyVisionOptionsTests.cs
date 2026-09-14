@@ -41,6 +41,18 @@ public class SafetyVisionOptionsTests
         Assert.Equal("127.0.0.1", new SafetyVisionOptions().ListenAddress);
     }
 
+    [Fact]
+    public void DefaultPpeThresholds_KeepTheCalibratedValues()
+    {
+        var options = new SafetyVisionOptions();
+
+        Assert.Equal(0.005, options.NoWearDetectionConfidence, precision: 6);
+        Assert.Equal(0.005, options.HardhatDetectionConfidence, precision: 6);
+        Assert.Equal(0.00001, options.MaskDetectionConfidence, precision: 8);
+        Assert.Equal(0.25, options.MinEvidenceRatio, precision: 6);
+        Assert.Equal(0.50, options.DecisionRatio, precision: 6);
+    }
+
     private static SafetyVisionOptions ValidOptions() => new()
     {
         ConnectionStrings = new ConnectionStringsOptions
