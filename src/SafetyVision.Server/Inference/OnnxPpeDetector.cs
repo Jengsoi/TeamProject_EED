@@ -289,16 +289,18 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
             .FirstOrDefault();
     }
 
-    private static int AdjustFaceTopForHardhat(DetectedBox? headwear, int detectedFaceTop)
+    private static int AdjustFaceTopForHeadwear(DetectedBox headwear, int detectedFaceTop)
     {
-        if (headwear is not { Class: DetectedClass.Hardhat } hardhat)
-            return detectedFaceTop;
-
-        // 흰색 안전모가 피부색 마스크에 걸리면 FindFaceTop이 헬멧 위쪽을 얼굴로 오인한다.
-        // 검출된 안전모의 아래쪽 25% 지점부터 실제 이마/눈 영역이 시작된다고 보고
-        // 마스크 분류 크롭이 안전모 본체를 포함하지 않도록 시작점을 아래로 내린다.
-        int belowHardhatShell = (int)(hardhat.Y + hardhat.Height * 0.75);
-        return Math.Max(detectedFaceTop, belowHardhatShell);
+        double anchorRatio = headwear.Class switch
+        {
+            // 안전모 박스는 헬멧 본체가 대부분이므로 하단 가까이에서 얼굴을 시작한다.
+            DetectedClass.Hardhat => 0.75,
+            // NO-Hardhat 박스는 머리카락부터 턱까지 포함하므로 상단 35%를 제외한다.
+            DetectedClass.NoHardhat => 0.35,
+            _ => 0,
+        };
+        int anchoredTop = (int)(headwear.Y + headwear.Height * anchorRatio);
+        return Math.Max(detectedFaceTop, anchoredTop);
     }
 
     public DetectionFrame Detect(ReadOnlySpan<byte> jpegBytes)
@@ -346,7 +348,7 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
                 continue;
 
             int faceTop = FindFaceTop(source, person);
-            faceTop = AdjustFaceTopForHardhat(headwear, faceTop);
+            faceTop = AdjustFaceTopForHeadwear(headwear.Value, faceTop);
             double faceCenterX = headwear.Value.CenterX;
             var maskBox = ClassifyMask(source, person, faceTop, faceCenterX);
             if (maskBox is not null) boxes.Add(maskBox.Value);
