@@ -65,6 +65,7 @@ public enum PersonRoiCondition
     None,
     Multiple,
     TooSmall,
+    TooClose,
     Qualified
 }
 

@@ -24,7 +24,7 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
     private readonly string _personInputName = "images";
     private readonly IReadOnlyDictionary<int, DetectedClass> _personClassMap = new Dictionary<int, DetectedClass>();
 
-    private readonly InferenceSession? _maskSession;
+    private readonly InferenceSession? _maskSession = null;
     private readonly string _maskInputName = "pixel_values";
     private readonly string _maskOutputName = "logits";
 
@@ -93,7 +93,8 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
         }
 
         (_personSession, _personInputName, _personClassMap) = TryLoadPersonModel(options.PersonModelPath);
-        (_maskSession, _maskInputName, _maskOutputName) = TryLoadMaskModel(options.MaskModelPath);
+        // 전체 검사 이력 검증 결과 PPE 모델의 Mask/NO-Mask 상대 점수가 실제 착용 상태를 안정적으로
+        // 구분했다. 얼굴 크롭 분류기는 거리와 각도에 따라 옷·목을 포함해 오판하므로 더 이상 로드하지 않는다.
     }
 
     private (InferenceSession? Session, string InputName, IReadOnlyDictionary<int, DetectedClass> ClassMap) TryLoadPersonModel(string path)
@@ -329,6 +330,31 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
         }
     }
 
+    private void ResolveMaskConflicts(
+        IReadOnlyList<DetectedBox> persons,
+        List<DetectedBox> ppeBoxes,
+        List<DetectedBox> resultBoxes)
+    {
+        foreach (var person in persons)
+        {
+            var candidates = ppeBoxes
+                .Where(b => b.Class is DetectedClass.Mask or DetectedClass.NoMask)
+                .Where(b => PpeAssociationRules.IsCandidate(b.Class, person, b, _options))
+                .OrderByDescending(b => b.Confidence)
+                .ToList();
+            if (candidates.Count <= 1)
+                continue;
+
+            var winner = candidates[0];
+            ppeBoxes.RemoveAll(b => b.Class is DetectedClass.Mask or DetectedClass.NoMask
+                && !b.Equals(winner)
+                && PpeAssociationRules.IsCandidate(b.Class, person, b, _options));
+            resultBoxes.RemoveAll(b => b.Class is DetectedClass.Mask or DetectedClass.NoMask
+                && !b.Equals(winner)
+                && PpeAssociationRules.IsCandidate(b.Class, person, b, _options));
+        }
+    }
+
     private static int AdjustFaceTopForHeadwear(DetectedBox headwear, int detectedFaceTop)
     {
         double anchorRatio = headwear.Class switch
@@ -356,13 +382,13 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
             {
                 DetectedClass.NoHardhat or DetectedClass.NoSafetyVest => (float)_options.NoWearDetectionConfidence,
                 DetectedClass.Hardhat => (float)_options.HardhatDetectionConfidence,
+                DetectedClass.Mask or DetectedClass.NoMask => (float)_options.MaskDetectionConfidence,
                 _ => (float)_options.DetectionConfidence,
             });
 
-        // safetyvision 모델 자체의 Person/Mask/NO-Mask 결과는 버린다(신뢰도 검증 실패, 사실상 0에 가까움).
-        // Hardhat/NoHardhat/SafetyVest/NoSafetyVest만 이 모델 결과를 그대로 쓴다.
+        // Person은 범용 모델 결과를 사용하고 PPE 장비 클래스는 모두 전용 모델 결과를 사용한다.
         var boxes = ppeBoxes
-            .Where(b => b.Class is not (DetectedClass.Person or DetectedClass.Mask or DetectedClass.NoMask))
+            .Where(b => b.Class != DetectedClass.Person)
             .ToList();
 
         List<DetectedBox> personBoxes;
@@ -377,22 +403,8 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
         }
 
         ResolveHeadwearConflicts(personBoxes, ppeBoxes, boxes);
+        ResolveMaskConflicts(personBoxes, ppeBoxes, boxes);
         boxes.AddRange(personBoxes);
-
-        // 사람 박스마다 얼굴 영역을 잘라 Mask 분류기를 돌리고, 결과를 합성 DetectedBox로 추가한다.
-        foreach (var person in personBoxes)
-        {
-            var headwear = FindHeadwear(person, ppeBoxes);
-            // 사람 전체 박스만으로 얼굴 위치를 추측하면 얼굴이 화면 밖에 있거나 몸을 기울인 장면에서
-            // 팔·옷·안전모를 얼굴로 잘라 마스크로 오판한다. 머리 위치를 확인한 사람만 분류한다.
-            if (headwear is null)
-                continue;
-
-            int faceTop = FindFaceTop(source, person);
-            faceTop = AdjustFaceTopForHeadwear(headwear.Value, faceTop);
-            var maskBox = ClassifyMask(source, person, headwear.Value, faceTop);
-            if (maskBox is not null) boxes.Add(maskBox.Value);
-        }
 
         return new DetectionFrame(boxes, source.Width, source.Height);
     }

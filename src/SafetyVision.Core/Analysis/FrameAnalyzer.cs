@@ -26,6 +26,9 @@ public static class FrameAnalyzer
 
         var target = persons[inRoiIndexes[0]];
         if (!RoiEvaluator.MeetsMinHeight(target, frameHeight, options)) return FrameEvaluation.TooSmall;
+        if (target.Height / frameHeight > options.MaxPersonHeightRatio
+            || target.Width / Math.Max(1, target.Height) > options.MaxPersonWidthToHeightRatio)
+            return FrameEvaluation.TooClose;
 
         var votes = EvaluateVotes(target, persons, boxes, options);
         return new FrameEvaluation(PersonRoiCondition.Qualified, votes);

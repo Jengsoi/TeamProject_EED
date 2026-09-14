@@ -49,6 +49,7 @@ public sealed class SafetyVisionOptions
     // 같은 이유로 Hardhat도 SafetyVest와 별도로 더 낮은 임계값을 쓴다(SafetyVest는 0.40에서도 안정적이라
     // DetectionConfidence를 그대로 쓴다).
     public double HardhatDetectionConfidence { get; set; } = 0.15;
+    public double MaskDetectionConfidence { get; set; } = 0.001;
 
     public double NmsIouThreshold { get; set; } = 0.45;
 
@@ -58,6 +59,8 @@ public sealed class SafetyVisionOptions
     public double RoiBottom { get; set; } = 0.95;
 
     public double MinPersonHeightRatio { get; set; } = 0.40;
+    public double MaxPersonHeightRatio { get; set; } = 0.92;
+    public double MaxPersonWidthToHeightRatio { get; set; } = 0.75;
     public double PersonStableDurationSeconds { get; set; } = 0.8;
     public double PersonLeaveDurationSeconds { get; set; } = 1.0;
 
@@ -96,10 +99,14 @@ public sealed class SafetyVisionOptions
         if (DetectionConfidence is < 0 or > 1) yield return "DetectionConfidence는 0~1 사이여야 합니다.";
         if (NoWearDetectionConfidence is < 0 or > 1) yield return "NoWearDetectionConfidence는 0~1 사이여야 합니다.";
         if (HardhatDetectionConfidence is < 0 or > 1) yield return "HardhatDetectionConfidence는 0~1 사이여야 합니다.";
+        if (MaskDetectionConfidence is < 0 or > 1) yield return "MaskDetectionConfidence는 0~1 사이여야 합니다.";
         if (NmsIouThreshold is < 0 or > 1) yield return "NmsIouThreshold는 0~1 사이여야 합니다.";
         if (!(RoiLeft >= 0 && RoiLeft < RoiRight && RoiRight <= 1)) yield return "RoiLeft < RoiRight 이며 0~1 범위여야 합니다.";
         if (!(RoiTop >= 0 && RoiTop < RoiBottom && RoiBottom <= 1)) yield return "RoiTop < RoiBottom 이며 0~1 범위여야 합니다.";
         if (MinPersonHeightRatio is <= 0 or > 1) yield return "MinPersonHeightRatio는 0~1 사이여야 합니다.";
+        if (MaxPersonHeightRatio is <= 0 or > 1) yield return "MaxPersonHeightRatio는 0~1 사이여야 합니다.";
+        if (MaxPersonHeightRatio <= MinPersonHeightRatio) yield return "MaxPersonHeightRatio는 MinPersonHeightRatio보다 커야 합니다.";
+        if (MaxPersonWidthToHeightRatio is <= 0 or > 2) yield return "MaxPersonWidthToHeightRatio는 0 초과 2 이하여야 합니다.";
         if (PersonStableDurationSeconds <= 0) yield return "PersonStableDurationSeconds는 양수여야 합니다.";
         if (PersonLeaveDurationSeconds <= 0) yield return "PersonLeaveDurationSeconds는 양수여야 합니다.";
         if (MinAnalysisDurationSeconds <= 0) yield return "MinAnalysisDurationSeconds는 양수여야 합니다.";

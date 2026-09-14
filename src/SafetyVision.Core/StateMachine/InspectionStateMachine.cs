@@ -109,6 +109,9 @@ public sealed class InspectionStateMachine
             case PersonRoiCondition.TooSmall:
                 GuidanceMessage = InspectionMessages.TooSmall;
                 break;
+            case PersonRoiCondition.TooClose:
+                GuidanceMessage = InspectionMessages.TooClose;
+                break;
             default:
                 GuidanceMessage = InspectionMessages.Waiting;
                 break;
@@ -122,6 +125,7 @@ public sealed class InspectionStateMachine
         {
             case PersonRoiCondition.Multiple:
             case PersonRoiCondition.TooSmall:
+            case PersonRoiCondition.TooClose:
                 // 여러 명 / 너무 작음은 명확한 이탈 사유이므로 유예 없이 즉시 초기화한다.
                 ResetToWaiting(eval.Condition);
                 return false;
@@ -167,6 +171,7 @@ public sealed class InspectionStateMachine
         {
             PersonRoiCondition.Multiple => InspectionMessages.MultiplePersons,
             PersonRoiCondition.TooSmall => InspectionMessages.TooSmall,
+            PersonRoiCondition.TooClose => InspectionMessages.TooClose,
             _ => InspectionMessages.Waiting
         };
     }
@@ -189,7 +194,11 @@ public sealed class InspectionStateMachine
                 break;
 
             case PersonRoiCondition.TooSmall:
+            case PersonRoiCondition.TooClose:
                 _absentSince = null;
+                GuidanceMessage = eval.Condition == PersonRoiCondition.TooClose
+                    ? InspectionMessages.TooClose
+                    : InspectionMessages.TooSmall;
                 break;
 
             case PersonRoiCondition.Qualified:

@@ -43,6 +43,14 @@ public class FrameAnalyzerTests
     }
 
     [Fact]
+    public void CroppedClosePerson_IsTooClose()
+    {
+        var boxes = new[] { Person(250, 0, 780, 720) };
+        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, Options);
+        Assert.Equal(PersonRoiCondition.TooClose, eval.Condition);
+    }
+
+    [Fact]
     public void QualifiedPersonWithConnectedHardhat_VotesPositive()
     {
         var boxes = new DetectedBox[]

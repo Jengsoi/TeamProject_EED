@@ -10,4 +10,5 @@ public sealed record FrameEvaluation(
     public static FrameEvaluation None { get; } = new(PersonRoiCondition.None, NoVotes);
     public static FrameEvaluation Multiple { get; } = new(PersonRoiCondition.Multiple, NoVotes);
     public static FrameEvaluation TooSmall { get; } = new(PersonRoiCondition.TooSmall, NoVotes);
+    public static FrameEvaluation TooClose { get; } = new(PersonRoiCondition.TooClose, NoVotes);
 }
