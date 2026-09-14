@@ -1,3 +1,4 @@
+using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SafetyVision.Client.Networking;
@@ -107,7 +108,8 @@ public sealed partial class ShellViewModel : ObservableObject
         await LeaveSiteInspectionIfNeededAsync();
         _intentionalDisconnect = true;
         try { await Connection.RequestAsync(MessageTypes.LogoutRequest, new LogoutRequestPayload(), TimeSpan.FromSeconds(3)); }
-        catch (Exception) { /* 연결이 이미 끊겼으면 그냥 로그아웃 처리한다 */ }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
+        { /* 연결이 이미 끊겼으면 그냥 로그아웃 처리한다 */ }
         Connection.Dispose();
         LoggedOut?.Invoke();
     }

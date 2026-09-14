@@ -15,6 +15,9 @@ builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnC
 
 var options = new SafetyVisionOptions();
 builder.Configuration.Bind(options);
+var mysqlConnection = Environment.GetEnvironmentVariable("SAFETYVISION_MYSQL_CONNSTR");
+if (!string.IsNullOrWhiteSpace(mysqlConnection))
+    options.ConnectionStrings.MySql = mysqlConnection;
 
 var validationErrors = options.Validate().ToList();
 if (validationErrors.Count > 0)

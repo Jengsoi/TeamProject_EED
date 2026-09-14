@@ -209,7 +209,9 @@ public sealed class ServerConnection(string host, int port) : IDisposable
         _disposed = true;
         Interlocked.Increment(ref _connectionGeneration);
         _readLoopCts?.Cancel();
-        try { _client?.Close(); } catch (Exception) { /* 정리 중 예외 무시 */ }
+        try { _client?.Close(); }
+        catch (Exception ex) when (ex is SocketException or ObjectDisposedException)
+        { /* 이미 종료된 소켓은 추가 정리가 필요 없다. */ }
         IsConnected = false;
         foreach (var kvp in _pending)
             kvp.Value.TrySetException(new ObjectDisposedException(nameof(ServerConnection)));

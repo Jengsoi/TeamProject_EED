@@ -108,6 +108,14 @@ dotnet test tests/SafetyVision.Tests
 
 환경변수가 없으면 DB 통합 테스트만 명확한 안내 메시지와 함께 실패하고(순수 로직 테스트는 영향 없음), 해당 클래스들은 `[Collection("MySqlIntegration", DisableParallelization = true)]`로 묶어 같은 테이블을 공유하는 테스트끼리 병렬 실행으로 간섭하지 않게 했다.
 
+### 이미지 회귀 평가
+
+현재 기준 검사 이력의 원본 사진은 개인정보 보호를 위해 저장소에 포함하지 않습니다. 사진 폴더를 인자로 전달하면 장비별 판정과 사진별 완전 일치 정확도를 계산하며, 두 정확도가 모두 90% 이상이어야 성공합니다.
+
+```powershell
+dotnet run --project tools/SafetyVision.Evaluation -- "$env:LOCALAPPDATA\SafetyVision\snapshots\20260914"
+```
+
 ## 8. Day1~6 검증 결과 요약
 
 - `dotnet build` (Client/Server/Core/Protocol/Data) 전체 0 오류.

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Net.Sockets;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -20,11 +21,11 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _clockTimer;
     private readonly ICameraService _camera;
+    private readonly ConnectionRecoveryService _recovery;
     private int _reportedWidth;
     private int _reportedHeight;
     private readonly SemaphoreSlim _frameSendGate = new(1, 1);
     private int _cameraFailureReported;
-    private int _reconnectRunning;
     private bool _isEntered;
 
     public SiteInspectionViewModel(ServerConnection connection) : this(connection, new OpenCvCameraService())
@@ -34,6 +35,7 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     internal SiteInspectionViewModel(ServerConnection connection, ICameraService camera)
     {
         _connection = connection;
+        _recovery = new ConnectionRecoveryService(connection);
         _camera = camera;
         _dispatcher = Dispatcher.CurrentDispatcher;
         _clockTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
@@ -134,7 +136,7 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
         {
             CameraErrorMessage = "카메라를 사용할 수 없습니다. 연결을 확인해 주세요.";
             try { await _connection.SendAsync(MessageTypes.InspectionSessionEnd, new InspectionSessionEndPayload("camera_error")); }
-            catch (Exception) { /* 세션이 이미 없으면 무시 */ }
+            catch (Exception ex) when (IsConnectionFailure(ex)) { /* 세션이 이미 없으면 무시 */ }
             UnsubscribeConnectionEvents();
             _clockTimer.Stop();
             _isEntered = false;
@@ -188,14 +190,14 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
         UnsubscribeConnectionEvents();
 
         try { await _connection.SendAsync(MessageTypes.InspectionSessionEnd, new InspectionSessionEndPayload(null)); }
-        catch (Exception) { /* 연결이 이미 끊겼으면 무시 */ }
+        catch (Exception ex) when (IsConnectionFailure(ex)) { /* 연결이 이미 끊겼으면 무시 */ }
     }
 
     private async Task SendFrameSafeAsync(FrameMetaPayload meta, byte[] jpeg)
     {
         if (!await _frameSendGate.WaitAsync(0)) return;
         try { await _connection.SendFrameAsync(meta, jpeg); }
-        catch (Exception) { /* 연결 문제는 Disconnected 이벤트로 처리한다 */ }
+        catch (Exception ex) when (IsConnectionFailure(ex)) { /* Disconnected 이벤트가 별도 처리 */ }
         finally { _frameSendGate.Release(); }
     }
 
@@ -208,7 +210,7 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
             Guidance = "검사가 중단되었습니다.";
         });
         try { await _connection.SendAsync(MessageTypes.InspectionSessionEnd, new InspectionSessionEndPayload("camera_disconnected")); }
-        catch (Exception) { /* 연결 종료와 동시에 발생할 수 있음 */ }
+        catch (Exception ex) when (IsConnectionFailure(ex)) { /* 연결 종료와 동시에 발생할 수 있음 */ }
     }
 
     private void UnsubscribeConnectionEvents()
@@ -247,20 +249,9 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
             CurrentInspectionKey = payload.InspectionKey;
 
             ResultItems.Clear();
-            foreach (var item in payload.Items)
-                ResultItems.Add(new EquipmentDisplayItem(item.EquipmentCode, DashboardViewModel.LabelFor(item.EquipmentCode), item.Status, item.Score));
-
-            if (image is not null)
-            {
-                var bmp = new BitmapImage();
-                using var ms = new MemoryStream(image);
-                bmp.BeginInit();
-                bmp.CacheOption = BitmapCacheOption.OnLoad;
-                bmp.StreamSource = ms;
-                bmp.EndInit();
-                bmp.Freeze();
-                ResultImage = bmp;
-            }
+            foreach (var item in InspectionResultMapper.ToDisplayItems(payload))
+                ResultItems.Add(item);
+            ResultImage = InspectionResultMapper.ToBitmap(image);
         });
     }
 
@@ -277,35 +268,26 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     private void OnDisconnected()
     {
         _dispatcher.BeginInvoke(() => ConnectionMessage = "서버 연결이 끊겼습니다. 재연결을 시도합니다.");
-        if (Interlocked.CompareExchange(ref _reconnectRunning, 1, 0) == 0)
+        if (_recovery.TryStart())
             _ = TryReconnectAsync();
     }
 
     private async Task TryReconnectAsync()
     {
-        try
+        bool ok = await _recovery.ReconnectAsync();
+        await _dispatcher.InvokeAsync(async () =>
         {
-            bool ok = await _connection.ConnectWithRetryAsync(5, TimeSpan.FromSeconds(2));
-            await _dispatcher.InvokeAsync(async () =>
+            if (ok && _isEntered)
             {
-                if (ok && _isEntered)
-                {
-                    // 서버의 새 TCP 세션은 인증되지 않은 상태다. 이전 로그인 권한을 암묵적으로
-                    // 승계하지 않고 로그인 화면으로 돌아가 새 세션을 인증한다.
-                    ConnectionMessage = "서버에 다시 연결했습니다. 다시 로그인해 주세요.";
-                    await LeaveAsync();
-                    ReauthenticationRequired?.Invoke();
-                }
-                else if (!ok && _isEntered)
-                {
-                    ConnectionMessage = "서버에 연결할 수 없습니다. 연결을 확인해 주세요.";
-                }
-            });
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _reconnectRunning, 0);
-        }
+                ConnectionMessage = "서버에 다시 연결했습니다. 다시 로그인해 주세요.";
+                await LeaveAsync();
+                ReauthenticationRequired?.Invoke();
+            }
+            else if (!ok && _isEntered)
+            {
+                ConnectionMessage = "서버에 연결할 수 없습니다. 연결을 확인해 주세요.";
+            }
+        });
     }
 
     [RelayCommand]
@@ -313,7 +295,7 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     {
         if (!CanRetryInspection) return;
         try { await _connection.SendAsync(MessageTypes.RetryInspectionRequest, new RetryInspectionRequestPayload()); }
-        catch (Exception) { /* Disconnected 이벤트가 별도 처리 */ }
+        catch (Exception ex) when (IsConnectionFailure(ex)) { /* Disconnected 이벤트가 별도 처리 */ }
     }
 
     [RelayCommand]
@@ -321,7 +303,7 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     {
         if (!CanRetrySave || CurrentInspectionKey is null) return;
         try { await _connection.SendAsync(MessageTypes.RetrySaveRequest, new RetrySaveRequestPayload(CurrentInspectionKey)); }
-        catch (Exception) { /* Disconnected 이벤트가 별도 처리 */ }
+        catch (Exception ex) when (IsConnectionFailure(ex)) { /* Disconnected 이벤트가 별도 처리 */ }
     }
 
     [RelayCommand]
@@ -334,4 +316,7 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
         }
         ReturnToDashboardRequested?.Invoke();
     }
+
+    private static bool IsConnectionFailure(Exception ex) =>
+        ex is IOException or SocketException or ObjectDisposedException or OperationCanceledException;
 }

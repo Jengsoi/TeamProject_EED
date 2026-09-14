@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\src\SafetyVision.Core\SafetyVision.Core.csproj" />
     <ProjectReference Include="..\..\src\SafetyVision.Protocol\SafetyVision.Protocol.csproj" />
     <ProjectReference Include="..\..\src\SafetyVision.Data\SafetyVision.Data.csproj" />
+    <ProjectReference Include="..\..\src\SafetyVision.Server\SafetyVision.Server.csproj" />
   </ItemGroup>
 
 </Project>

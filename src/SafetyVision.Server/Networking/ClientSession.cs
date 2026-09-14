@@ -25,7 +25,9 @@ public sealed class ClientSession(
     ILogger<ClientSession> logger)
 {
     private readonly NetworkStream _stream = client.GetStream();
+    private readonly ClientAuthHandler _auth = new(scopeFactory);
     private readonly ClientQueryHandler _queries = new(scopeFactory);
+    private readonly InspectionPersistenceHandler _persistence = new(scopeFactory);
     private readonly InspectionSessionContext _inspection = new(options);
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     // _inspection.StateMachine/_inspection.LastDetection/_inspection.LastFrameJpeg/_inspection.AnalysisFrames/_inspection.PendingSave는 원래 단일 수신 루프에서만
@@ -72,13 +74,16 @@ public sealed class ClientSession(
         {
             _frameChannel.Writer.TryComplete();
             try { await frameProcessingTask.ConfigureAwait(false); }
-            catch (Exception) { /* 프레임 처리 루프 종료 중 예외는 연결 종료 처리에 영향 주지 않는다 */ }
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
+            { /* 연결 종료 과정에서 끝난 프레임 작업은 추가 처리가 필요 없다. */ }
 
             await _stateLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
             try { _inspection.StateMachine.Cancel(CancelReason.ConnectionClosed, NowSeconds()); }
             finally { _stateLock.Release(); }
 
-            try { client.Close(); } catch (Exception) { /* 연결 정리 과정의 예외는 무시한다 */ }
+            try { client.Close(); }
+            catch (Exception ex) when (ex is SocketException or ObjectDisposedException)
+            { /* 이미 종료된 소켓은 추가 정리가 필요 없다. */ }
         }
     }
 
@@ -115,14 +120,8 @@ public sealed class ClientSession(
     private async Task HandleLoginAsync(Envelope envelope, CancellationToken ct)
     {
         var req = envelope.DeserializePayload<LoginRequestPayload>();
-        using var scope = scopeFactory.CreateScope();
-        var auth = scope.ServiceProvider.GetRequiredService<AuthService>();
-        var (success, displayName) = await auth.ValidateLoginAsync(req.LoginId, req.Password, ct).ConfigureAwait(false);
-        _isAuthenticated = success;
-
-        var payload = success
-            ? new LoginResponsePayload(true, displayName, null)
-            : new LoginResponsePayload(false, null, "아이디 또는 비밀번호를 확인해 주세요.");
+        var payload = await _auth.LoginAsync(req, ct).ConfigureAwait(false);
+        _isAuthenticated = payload.Success;
         await SendAsync(MessageTypes.LoginResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
     }
 
@@ -395,9 +394,7 @@ public sealed class ClientSession(
 
         if (pending is null) return;
 
-        using var scope = scopeFactory.CreateScope();
-        var saveService = scope.ServiceProvider.GetRequiredService<InspectionSaveService>();
-        var result = await saveService.SaveAsync(pending, ct).ConfigureAwait(false);
+        var result = await _persistence.SaveAsync(pending, ct).ConfigureAwait(false);
 
         await _stateLock.WaitAsync(ct).ConfigureAwait(false);
         try
