@@ -404,6 +404,11 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
 
         ResolveHeadwearConflicts(personBoxes, ppeBoxes, boxes);
         ResolveMaskConflicts(personBoxes, ppeBoxes, boxes);
+
+        // 임계값이 낮은 Mask/NO-Mask는 배경에서도 작은 후보가 생길 수 있다. 판정에도 쓰이지 않는
+        // 사람 비연결 PPE를 결과 이미지에 그리지 않도록 여기서 제거한다.
+        boxes.RemoveAll(box => box.Class != DetectedClass.Person
+            && !personBoxes.Any(person => PpeAssociationRules.IsCandidate(box.Class, person, box, _options)));
         boxes.AddRange(personBoxes);
 
         return new DetectionFrame(boxes, source.Width, source.Height);
@@ -457,6 +462,18 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
             for (int c = 0; c < numClasses; c++)
             {
                 float score = span[(4 + c) * numBoxes + i];
+
+                // YOLO 출력은 클래스별 독립 점수다. Mask/NO-Mask 점수는 다른 PPE 클래스보다 작아서
+                // 전체 클래스 1등만 선택하면 얼굴 후보가 대부분 사라진다. 두 클래스는 각자 임계값을
+                // 넘는 순간 독립 후보로 보존하고, 사람별 충돌 해소 단계에서 최종 하나를 고른다.
+                if (classMap.TryGetValue(c, out var maskClass)
+                    && maskClass is DetectedClass.Mask or DetectedClass.NoMask
+                    && score >= thresholdFor(maskClass))
+                {
+                    raw.Add(new RawDetection(maskClass, score,
+                        cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2));
+                }
+
                 if (score > bestScore)
                 {
                     bestScore = score;
@@ -468,6 +485,10 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
                 continue;
 
             if (!classMap.TryGetValue(bestClass, out var detectedClass))
+                continue;
+
+            // 위에서 클래스별로 추가했으므로 같은 후보를 다시 넣지 않는다.
+            if (detectedClass is DetectedClass.Mask or DetectedClass.NoMask)
                 continue;
 
             if (bestScore < thresholdFor(detectedClass))

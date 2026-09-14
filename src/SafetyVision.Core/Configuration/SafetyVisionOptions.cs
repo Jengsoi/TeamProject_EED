@@ -49,7 +49,7 @@ public sealed class SafetyVisionOptions
     // 같은 이유로 Hardhat도 SafetyVest와 별도로 더 낮은 임계값을 쓴다(SafetyVest는 0.40에서도 안정적이라
     // DetectionConfidence를 그대로 쓴다).
     public double HardhatDetectionConfidence { get; set; } = 0.15;
-    public double MaskDetectionConfidence { get; set; } = 0.001;
+    public double MaskDetectionConfidence { get; set; } = 0.00001;
 
     public double NmsIouThreshold { get; set; } = 0.45;
 
@@ -75,7 +75,7 @@ public sealed class SafetyVisionOptions
     public double DecisionRatio { get; set; } = 0.70;
 
     public double PersonHorizontalMarginRatio { get; set; } = 0.05;
-    public double HeadTopMarginRatio { get; set; } = 0.05;
+    public double HeadTopMarginRatio { get; set; } = 0.15;
     public double HardhatBottomRatio { get; set; } = 0.35;
     public double MaskBottomRatio { get; set; } = 0.40;
     public double VestTopRatio { get; set; } = 0.20;
