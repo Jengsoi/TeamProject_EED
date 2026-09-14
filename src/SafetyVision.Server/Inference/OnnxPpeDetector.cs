@@ -236,19 +236,20 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
     // safetyvision 모델의 Mask/NO-Mask 클래스는 실측 결과 신뢰도가 사실상 0에 가까워(별도 검증 완료) 대신
     // 사람 박스마다 얼굴 영역을 잘라 이진 분류기(Mask/No Mask)에 넣는다. 결과는 Hardhat/SafetyVest와 동일하게
     // 합성 DetectedBox로 만들어 FrameAnalyzer의 기존 연관 판정 로직을 그대로 재사용한다.
-    private DetectedBox? ClassifyMask(Mat source, DetectedBox person, int faceTop, double faceCenterX)
+    private DetectedBox? ClassifyMask(Mat source, DetectedBox person, DetectedBox headwear, int faceTop)
     {
         if (_maskSession is null) return null;
 
         // 눈 위쪽에서 시작하던 크롭을 코·입·턱 방향으로 조금 내려 마스크 착용 부위를 중심에 둔다.
         double headTop = Math.Max(person.Y, faceTop)
             + _options.MaskClassifierTopOffsetRatio * person.Height;
-        double cropHalfWidth = _options.MaskClassifierCropHalfWidthRatio * person.Width;
-        double cx = faceCenterX;
+        double cropHalfWidth = 0.45 * headwear.Width;
+        double cropHeight = headwear.Height * (headwear.Class == DetectedClass.Hardhat ? 1.20 : 0.50);
+        double cx = headwear.CenterX;
         int x = (int)Math.Clamp(cx - cropHalfWidth, 0, source.Width);
         int y = (int)Math.Clamp(headTop, 0, source.Height);
         int x2 = (int)Math.Clamp(cx + cropHalfWidth, 0, source.Width);
-        int y2 = (int)Math.Clamp(headTop + _options.MaskClassifierCropBottomRatio * person.Height, 0, source.Height);
+        int y2 = (int)Math.Clamp(headTop + cropHeight, 0, source.Height);
         int w = x2 - x, h = y2 - y;
         if (w <= 0 || h <= 0) return null;
 
@@ -271,10 +272,28 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
         float e0 = MathF.Exp(logits[0] - max), e1 = MathF.Exp(logits[1] - max);
         float pMask = e0 / (e0 + e1), pNoMask = e1 / (e0 + e1);
 
-        var (detectedClass, confidence) = pMask >= pNoMask ? (DetectedClass.Mask, pMask) : (DetectedClass.NoMask, pNoMask);
+        double skinRatio = MeasureLowerFaceSkinRatio(face);
+        var (detectedClass, confidence) = skinRatio switch
+        {
+            // 최근 실측에서 맨얼굴은 0.88 이상, 흰 마스크 착용 얼굴은 0.64 이하로 분리됐다.
+            >= 0.78 => (DetectedClass.NoMask, Math.Max(pNoMask, 0.80f)),
+            <= 0.65 => (DetectedClass.Mask, Math.Max(pMask, 0.80f)),
+            _ => pMask >= pNoMask ? (DetectedClass.Mask, pMask) : (DetectedClass.NoMask, pNoMask),
+        };
         if (confidence < _options.MaskClassifierConfidence) return null;
 
         return new DetectedBox(detectedClass, x, y, w, h, confidence);
+    }
+
+    private static double MeasureLowerFaceSkinRatio(Mat face)
+    {
+        int lowerY = face.Rows * 2 / 5;
+        using var lowerFace = new Mat(face, new Rect(0, lowerY, face.Cols, face.Rows - lowerY));
+        using var ycrcb = new Mat();
+        Cv2.CvtColor(lowerFace, ycrcb, ColorConversionCodes.BGR2YCrCb);
+        using var skinMask = new Mat();
+        Cv2.InRange(ycrcb, new Scalar(40, 135, 85), new Scalar(255, 180, 135), skinMask);
+        return Cv2.CountNonZero(skinMask) / (double)(skinMask.Rows * skinMask.Cols);
     }
 
     private DetectedBox? FindHeadwear(
@@ -371,8 +390,7 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
 
             int faceTop = FindFaceTop(source, person);
             faceTop = AdjustFaceTopForHeadwear(headwear.Value, faceTop);
-            double faceCenterX = headwear.Value.CenterX;
-            var maskBox = ClassifyMask(source, person, faceTop, faceCenterX);
+            var maskBox = ClassifyMask(source, person, headwear.Value, faceTop);
             if (maskBox is not null) boxes.Add(maskBox.Value);
         }
 
