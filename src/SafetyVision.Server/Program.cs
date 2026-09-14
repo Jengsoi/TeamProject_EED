@@ -7,6 +7,7 @@ using SafetyVision.Core.Configuration;
 using SafetyVision.Data;
 using SafetyVision.Data.Seeding;
 using SafetyVision.Data.Services;
+using SafetyVision.Server.Features;
 using SafetyVision.Server.Inference;
 using SafetyVision.Server.Networking;
 
@@ -31,6 +32,10 @@ builder.Services.AddScoped<DashboardQueryService>();
 builder.Services.AddScoped<HistoryQueryService>();
 builder.Services.AddScoped<InspectionSaveService>();
 builder.Services.AddScoped<StatisticsQueryService>();
+builder.Services.AddScoped<StatisticsService>();
+builder.Services.AddScoped<EquipmentManagementService>();
+builder.Services.AddScoped<UserManagementService>();
+builder.Services.AddScoped<SystemSettingsService>();
 
 if (options.UseFakeDetection)
     builder.Services.AddSingleton<IPpeDetector, FakePpeDetector>();

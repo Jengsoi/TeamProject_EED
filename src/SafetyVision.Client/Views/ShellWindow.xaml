@@ -8,21 +8,15 @@
         Background="{StaticResource PageBackgroundBrush}">
 
     <Window.Resources>
-        <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
-            <views:DashboardView/>
-        </DataTemplate>
-        <DataTemplate DataType="{x:Type vm:SiteInspectionViewModel}">
-            <views:SiteInspectionView/>
-        </DataTemplate>
-        <DataTemplate DataType="{x:Type vm:HistoryViewModel}">
-            <views:HistoryView/>
-        </DataTemplate>
-        <DataTemplate DataType="{x:Type vm:StatisticsViewModel}">
-            <views:StatisticsView/>
-        </DataTemplate>
-        <DataTemplate DataType="{x:Type vm:PlaceholderViewModel}">
-            <views:PlaceholderView/>
-        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:DashboardViewModel}"><views:DashboardView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SiteInspectionViewModel}"><views:SiteInspectionView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:HistoryViewModel}"><views:HistoryView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:StatisticsViewModel}"><views:StatisticsView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:CameraManagementViewModel}"><views:CameraManagementView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:EquipmentManagementViewModel}"><views:EquipmentManagementView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:UserManagementViewModel}"><views:UserManagementView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SystemSettingsViewModel}"><views:SystemSettingsView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:PlaceholderViewModel}"><views:PlaceholderView/></DataTemplate>
     </Window.Resources>
 
     <Grid>
@@ -34,7 +28,7 @@
         <Border Grid.Column="0" Background="{StaticResource NavyBrush}">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Top" Margin="16,20,16,24" Orientation="Horizontal">
-                    <TextBlock Text="🛡" FontSize="20" Foreground="{StaticResource AccentBrush}" Margin="0,0,8,0"/>
+                    <TextBlock Text="◈" FontSize="20" Foreground="{StaticResource AccentBrush}" Margin="0,0,8,0"/>
                     <TextBlock Text="SAFETY VISION" FontSize="15" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
                 </StackPanel>
 
@@ -50,10 +44,10 @@
                     <Button Content="현장 검사" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigateSiteInspectionCommand}"/>
                     <Button Content="검사 이력" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigateHistoryCommand}"/>
                     <Button Content="통계 분석" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigateStatisticsCommand}"/>
-                    <Button Content="카메라 관리" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigatePlaceholderCommand}" CommandParameter="카메라 관리"/>
-                    <Button Content="장비 관리" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigatePlaceholderCommand}" CommandParameter="장비 관리"/>
-                    <Button Content="사용자 관리" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigatePlaceholderCommand}" CommandParameter="사용자 관리"/>
-                    <Button Content="시스템 설정" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigatePlaceholderCommand}" CommandParameter="시스템 설정"/>
+                    <Button Content="카메라 관리" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigateCameraCommand}"/>
+                    <Button Content="장비 관리" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigateEquipmentCommand}"/>
+                    <Button Content="사용자 관리" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigateUsersCommand}"/>
+                    <Button Content="시스템 설정" Style="{StaticResource SidebarButtonStyle}" Command="{Binding NavigateSystemSettingsCommand}"/>
                 </StackPanel>
             </DockPanel>
         </Border>

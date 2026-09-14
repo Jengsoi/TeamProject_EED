@@ -6,10 +6,12 @@ using SafetyVision.Core.Analysis;
 using SafetyVision.Core.Configuration;
 using SafetyVision.Core.Domain;
 using SafetyVision.Core.StateMachine;
+using SafetyVision.Data.Seeding;
 using SafetyVision.Data.Services;
 using SafetyVision.Protocol;
 using SafetyVision.Protocol.Dto;
 using SafetyVision.Protocol.Framing;
+using SafetyVision.Server.Features;
 using SafetyVision.Server.Inference;
 
 namespace SafetyVision.Server.Networking;
@@ -37,6 +39,11 @@ public sealed class ClientSession(
     private bool _inspectionSessionActive;
     private long _lastFrameSequence = -1;
     private double _lastInferenceAt = double.NegativeInfinity;
+
+    private bool IsAdmin => string.Equals(
+        _authenticatedLoginId,
+        AdminSeeder.AdminLoginId,
+        StringComparison.OrdinalIgnoreCase);
 
     private sealed record AnalysisFrameRecord(byte[] Jpeg, IReadOnlyList<DetectedBox> Boxes, double PersonConfidence);
 
@@ -69,10 +76,24 @@ public sealed class ClientSession(
         }
     }
 
-    private Task DispatchAsync(Envelope envelope, CancellationToken ct) =>
-        _authenticatedLoginId is null && envelope.Type != MessageTypes.LoginRequest
-            ? RejectUnauthorizedAsync(envelope, ct)
-            : DispatchAuthenticatedAsync(envelope, ct);
+    private Task DispatchAsync(Envelope envelope, CancellationToken ct)
+    {
+        if (_authenticatedLoginId is null && envelope.Type != MessageTypes.LoginRequest)
+            return RejectUnauthorizedAsync(envelope, ct);
+
+        if (IsAdminOnlyRequest(envelope.Type) && !IsAdmin)
+            return RejectForbiddenAsync(envelope, ct);
+
+        return DispatchAuthenticatedAsync(envelope, ct);
+    }
+
+    private static bool IsAdminOnlyRequest(string type) => type is
+        MessageTypes.EquipmentManagementRequest or
+        MessageTypes.UserListRequest or
+        MessageTypes.UserCreateRequest or
+        MessageTypes.UserPasswordChangeRequest or
+        MessageTypes.UserDeleteRequest or
+        MessageTypes.SystemSettingsRequest;
 
     private Task DispatchAuthenticatedAsync(Envelope envelope, CancellationToken ct) => envelope.Type switch
     {
@@ -87,6 +108,12 @@ public sealed class ClientSession(
         MessageTypes.InspectionSessionEnd => HandleSessionEndAsync(envelope, ct),
         MessageTypes.HistoryPageRequest => HandleHistoryPageAsync(envelope, ct),
         MessageTypes.InspectionDetailRequest => HandleInspectionDetailAsync(envelope, ct),
+        MessageTypes.EquipmentManagementRequest => HandleEquipmentManagementAsync(envelope, ct),
+        MessageTypes.UserListRequest => HandleUserListAsync(envelope, ct),
+        MessageTypes.UserCreateRequest => HandleUserCreateAsync(envelope, ct),
+        MessageTypes.UserPasswordChangeRequest => HandleUserPasswordChangeAsync(envelope, ct),
+        MessageTypes.UserDeleteRequest => HandleUserDeleteAsync(envelope, ct),
+        MessageTypes.SystemSettingsRequest => HandleSystemSettingsAsync(envelope, ct),
         _ => TrySendErrorAsync(envelope.CorrelationId, ErrorCodes.InvalidRequest, "알 수 없는 메시지 유형입니다.", ct)
     };
 
@@ -98,6 +125,12 @@ public sealed class ClientSession(
 
         logger.LogWarning("Unauthenticated request rejected: {Type}", envelope.Type);
         await TrySendErrorAsync(envelope.CorrelationId, ErrorCodes.Unauthorized, "로그인이 필요합니다.", ct).ConfigureAwait(false);
+    }
+
+    private Task RejectForbiddenAsync(Envelope envelope, CancellationToken ct)
+    {
+        logger.LogWarning("Non-admin request rejected: {Type}", envelope.Type);
+        return TrySendErrorAsync(envelope.CorrelationId, ErrorCodes.Forbidden, "Admin permission is required.", ct);
     }
 
     private async Task HandleLoginAsync(Envelope envelope, CancellationToken ct)
@@ -144,24 +177,65 @@ public sealed class ClientSession(
 
     private async Task HandleStatisticsAsync(Envelope envelope, CancellationToken ct)
     {
+        var req = envelope.DeserializePayload<StatisticsRequestPayload>();
         using var scope = scopeFactory.CreateScope();
-        var dashboardSvc = scope.ServiceProvider.GetRequiredService<DashboardQueryService>();
-        var statsSvc = scope.ServiceProvider.GetRequiredService<StatisticsQueryService>();
-
-        var stats = await dashboardSvc.GetStatsAsync(ct).ConfigureAwait(false);
-        var breakdown = await statsSvc.GetEquipmentBreakdownAsync(ct).ConfigureAwait(false);
-        var dailyTrend = await statsSvc.GetDailyTrendAsync(14, ct).ConfigureAwait(false);
-        var monthlyTrend = await statsSvc.GetMonthlyTrendAsync(6, ct).ConfigureAwait(false);
-        var cameraBreakdown = await statsSvc.GetCameraBreakdownAsync(ct).ConfigureAwait(false);
-
-        var payload = new StatisticsResponsePayload(
-            stats.Total, stats.Normal, stats.CheckRequired + stats.Unconfirmed,
-            breakdown.Select(b => new EquipmentBreakdownPayload(EquipmentClassMap.ToDbCode(b.Code), b.Worn, b.NotWorn, b.Unknown)).ToList(),
-            dailyTrend.Select(d => new DailyTrendPointPayload(d.Date, d.Normal, d.CheckRequired)).ToList(),
-            monthlyTrend.Select(m => new MonthlyTrendPointPayload(m.Year, m.Month, m.Normal, m.CheckRequired)).ToList(),
-            cameraBreakdown.Select(c => new CameraBreakdownPayload(c.CameraName, c.Total, c.Normal, c.CheckRequired)).ToList());
+        var statsSvc = scope.ServiceProvider.GetRequiredService<StatisticsService>();
+        var payload = await statsSvc.HandleAsync(req, ct).ConfigureAwait(false);
 
         await SendAsync(MessageTypes.StatisticsResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
+    }
+
+    private async Task HandleEquipmentManagementAsync(Envelope envelope, CancellationToken ct)
+    {
+        var req = envelope.DeserializePayload<EquipmentManagementRequestPayload>();
+        using var scope = scopeFactory.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<EquipmentManagementService>();
+        var payload = await service.HandleAsync(req, ct).ConfigureAwait(false);
+        await SendAsync(MessageTypes.EquipmentManagementResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
+    }
+
+    private async Task HandleUserListAsync(Envelope envelope, CancellationToken ct)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<UserManagementService>();
+        var payload = await service.ListAsync(ct).ConfigureAwait(false);
+        await SendAsync(MessageTypes.UserListResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
+    }
+
+    private async Task HandleUserCreateAsync(Envelope envelope, CancellationToken ct)
+    {
+        var req = envelope.DeserializePayload<UserCreateRequestPayload>();
+        using var scope = scopeFactory.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<UserManagementService>();
+        var payload = await service.CreateAsync(req, ct).ConfigureAwait(false);
+        await SendAsync(MessageTypes.UserMutationResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
+    }
+
+    private async Task HandleUserPasswordChangeAsync(Envelope envelope, CancellationToken ct)
+    {
+        var req = envelope.DeserializePayload<UserPasswordChangeRequestPayload>();
+        using var scope = scopeFactory.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<UserManagementService>();
+        var payload = await service.ChangePasswordAsync(req, ct).ConfigureAwait(false);
+        await SendAsync(MessageTypes.UserMutationResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
+    }
+
+    private async Task HandleUserDeleteAsync(Envelope envelope, CancellationToken ct)
+    {
+        var req = envelope.DeserializePayload<UserDeleteRequestPayload>();
+        using var scope = scopeFactory.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<UserManagementService>();
+        var payload = await service.DeleteAsync(req, ct).ConfigureAwait(false);
+        await SendAsync(MessageTypes.UserMutationResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
+    }
+
+    private async Task HandleSystemSettingsAsync(Envelope envelope, CancellationToken ct)
+    {
+        var req = envelope.DeserializePayload<SystemSettingsRequestPayload>();
+        using var scope = scopeFactory.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<SystemSettingsService>();
+        var payload = service.Handle(req, databaseReady: true);
+        await SendAsync(MessageTypes.SystemSettingsResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
     }
 
     private async Task HandleSessionStartAsync(Envelope envelope, CancellationToken ct)

@@ -24,7 +24,7 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
         _options = options;
         _logger = logger;
 
-        string fullPath = Path.GetFullPath(options.ModelPath);
+        string fullPath = ResolveModelPath(options.ModelPath);
         if (!File.Exists(fullPath))
         {
             UnavailableReason = $"모델 파일을 찾을 수 없습니다: {fullPath}";
@@ -66,6 +66,21 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
             UnavailableReason = $"모델 로딩 실패: {ex.Message}";
             _logger.LogError(ex, "ONNX 모델 로딩 실패");
         }
+    }
+
+    private static string ResolveModelPath(string configuredPath)
+    {
+        if (Path.IsPathRooted(configuredPath))
+            return Path.GetFullPath(configuredPath);
+
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, configuredPath),
+            Path.GetFullPath(configuredPath),
+            Path.Combine(Directory.GetCurrentDirectory(), "src", "SafetyVision.Server", configuredPath)
+        };
+
+        return candidates.FirstOrDefault(File.Exists) ?? candidates[0];
     }
 
     public DetectionFrame Detect(ReadOnlySpan<byte> jpegBytes)

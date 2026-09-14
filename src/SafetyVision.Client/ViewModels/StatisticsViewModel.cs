@@ -19,6 +19,8 @@ namespace SafetyVision.Client.ViewModels;
 // 실제 화면을 만들기로 함. 대시보드보다 상세한 장비별 착용/미착용/미확인 건수를 보여준다.
 public sealed partial class StatisticsViewModel(ServerConnection connection) : ObservableObject
 {
+    [ObservableProperty] private DateTime? fromDate = DateTime.Today.AddDays(-6);
+    [ObservableProperty] private DateTime? toDate = DateTime.Today;
     [ObservableProperty] private int total;
     [ObservableProperty] private int normal;
     [ObservableProperty] private int checkRequired;
@@ -49,7 +51,9 @@ public sealed partial class StatisticsViewModel(ServerConnection connection) : O
         ErrorMessage = null;
         try
         {
-            var envelope = await connection.RequestAsync(MessageTypes.StatisticsRequest, new StatisticsRequestPayload());
+            var envelope = await connection.RequestAsync(
+                MessageTypes.StatisticsRequest,
+                new StatisticsRequestPayload(ToUtcStart(FromDate), ToUtcExclusiveEnd(ToDate)));
             var stats = envelope.DeserializePayload<StatisticsResponsePayload>();
             Apply(stats);
         }
@@ -62,6 +66,33 @@ public sealed partial class StatisticsViewModel(ServerConnection connection) : O
             IsLoading = false;
         }
     }
+
+    [RelayCommand]
+    private async Task LoadRecent7DaysAsync()
+    {
+        FromDate = DateTime.Today.AddDays(-6);
+        ToDate = DateTime.Today;
+        await LoadAsync();
+    }
+
+    [RelayCommand]
+    private async Task LoadRecent30DaysAsync()
+    {
+        FromDate = DateTime.Today.AddDays(-29);
+        ToDate = DateTime.Today;
+        await LoadAsync();
+    }
+
+    [RelayCommand]
+    private async Task LoadAllAsync()
+    {
+        FromDate = null;
+        ToDate = null;
+        await LoadAsync();
+    }
+
+    [RelayCommand]
+    private Task RefreshAsync() => LoadAsync();
 
     [RelayCommand]
     private void ExportCsv()
@@ -182,6 +213,14 @@ public sealed partial class StatisticsViewModel(ServerConnection connection) : O
 
     private static SolidColorPaint ToSkia(System.Windows.Media.SolidColorBrush brush) =>
         new(new SKColor(brush.Color.R, brush.Color.G, brush.Color.B));
+
+    private static DateTimeOffset? ToUtcStart(DateTime? date) => date is { } value
+        ? new DateTimeOffset(DateTime.SpecifyKind(value.Date, DateTimeKind.Local)).ToUniversalTime()
+        : null;
+
+    private static DateTimeOffset? ToUtcExclusiveEnd(DateTime? date) => date is { } value
+        ? new DateTimeOffset(DateTime.SpecifyKind(value.Date.AddDays(1), DateTimeKind.Local)).ToUniversalTime()
+        : null;
 }
 
 public sealed record EquipmentBreakdownRow(string Label, int Worn, int NotWorn, int Unknown)

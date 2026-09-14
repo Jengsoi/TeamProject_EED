@@ -16,6 +16,19 @@
                         VerticalAlignment="Center" Cursor="Hand"/>
             </Grid>
 
+            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,16">
+                <WrapPanel VerticalAlignment="Center">
+                    <TextBlock Text="기간" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <DatePicker SelectedDate="{Binding FromDate, Mode=TwoWay}" Width="132" SelectedDateFormat="Short"/>
+                    <TextBlock Text="~" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="8,0"/>
+                    <DatePicker SelectedDate="{Binding ToDate, Mode=TwoWay}" Width="132" SelectedDateFormat="Short" Margin="0,0,12,0"/>
+                    <Button Content="최근 7일" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding LoadRecent7DaysCommand}" Margin="0,0,8,0"/>
+                    <Button Content="최근 30일" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding LoadRecent30DaysCommand}" Margin="0,0,8,0"/>
+                    <Button Content="전체" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding LoadAllCommand}" Margin="0,0,8,0"/>
+                    <Button Content="조회" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding RefreshCommand}"/>
+                </WrapPanel>
+            </Border>
+
             <Grid Margin="0,0,0,16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>

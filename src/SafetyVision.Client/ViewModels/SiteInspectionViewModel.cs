@@ -128,7 +128,10 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
         _connection.ErrorReceived += OnErrorReceived;
         _connection.Disconnected += OnDisconnected;
 
-        _capture = new VideoCapture(ClientSettings.CameraIndex);
+        var cameraOptions = CameraOptionsStore.Current;
+        FrameWidth = cameraOptions.CameraWidth;
+        FrameHeight = cameraOptions.CameraHeight;
+        _capture = new VideoCapture(cameraOptions.CameraIndex);
         if (!_capture.IsOpened())
         {
             CameraErrorMessage = "카메라를 사용할 수 없습니다. 연결을 확인해 주세요.";
@@ -136,12 +139,12 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
             return;
         }
 
-        _capture.Set(VideoCaptureProperties.FrameWidth, ClientSettings.CameraWidth);
-        _capture.Set(VideoCaptureProperties.FrameHeight, ClientSettings.CameraHeight);
+        _capture.Set(VideoCaptureProperties.FrameWidth, cameraOptions.CameraWidth);
+        _capture.Set(VideoCaptureProperties.FrameHeight, cameraOptions.CameraHeight);
         int reportedWidth = (int)_capture.Get(VideoCaptureProperties.FrameWidth);
         int reportedHeight = (int)_capture.Get(VideoCaptureProperties.FrameHeight);
-        FrameWidth = reportedWidth > 0 ? reportedWidth : ClientSettings.CameraWidth;
-        FrameHeight = reportedHeight > 0 ? reportedHeight : ClientSettings.CameraHeight;
+        FrameWidth = reportedWidth > 0 ? reportedWidth : cameraOptions.CameraWidth;
+        FrameHeight = reportedHeight > 0 ? reportedHeight : cameraOptions.CameraHeight;
 
         if (!await StartSessionAsync())
         {

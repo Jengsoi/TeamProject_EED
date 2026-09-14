@@ -19,6 +19,10 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly SiteInspectionViewModel _siteInspectionVm;
     private readonly HistoryViewModel _historyVm;
     private readonly StatisticsViewModel _statisticsVm;
+    private readonly CameraManagementViewModel _cameraVm;
+    private readonly EquipmentManagementViewModel _equipmentVm;
+    private readonly UserManagementViewModel _userVm;
+    private readonly SystemSettingsViewModel _systemSettingsVm;
 
     public event Action? LoggedOut;
     public event Action? ConnectionLost;
@@ -36,6 +40,10 @@ public sealed partial class ShellViewModel : ObservableObject
         _siteInspectionVm.ConnectionLost += () => ConnectionLost?.Invoke();
         _historyVm = new HistoryViewModel(connection);
         _statisticsVm = new StatisticsViewModel(connection);
+        _cameraVm = new CameraManagementViewModel();
+        _equipmentVm = new EquipmentManagementViewModel(connection);
+        _userVm = new UserManagementViewModel(connection);
+        _systemSettingsVm = new SystemSettingsViewModel(connection);
 
         Connection.Disconnected += OnConnectionDisconnected;
 
@@ -90,6 +98,42 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task NavigateCameraAsync()
+    {
+        if (!await LeaveSiteInspectionIfNeededAsync()) return;
+        ActiveMenu = "camera";
+        CurrentViewModel = _cameraVm;
+        await _cameraVm.LoadAsync();
+    }
+
+    [RelayCommand]
+    private async Task NavigateEquipmentAsync()
+    {
+        if (!await LeaveSiteInspectionIfNeededAsync()) return;
+        ActiveMenu = "equipment";
+        CurrentViewModel = _equipmentVm;
+        await _equipmentVm.LoadAsync();
+    }
+
+    [RelayCommand]
+    private async Task NavigateUsersAsync()
+    {
+        if (!await LeaveSiteInspectionIfNeededAsync()) return;
+        ActiveMenu = "users";
+        CurrentViewModel = _userVm;
+        await _userVm.LoadAsync();
+    }
+
+    [RelayCommand]
+    private async Task NavigateSystemSettingsAsync()
+    {
+        if (!await LeaveSiteInspectionIfNeededAsync()) return;
+        ActiveMenu = "settings";
+        CurrentViewModel = _systemSettingsVm;
+        await _systemSettingsVm.LoadAsync();
+    }
+
+    [RelayCommand]
     private async Task NavigatePlaceholderAsync(string title)
     {
         if (!await LeaveSiteInspectionIfNeededAsync()) return;
@@ -110,9 +154,15 @@ public sealed partial class ShellViewModel : ObservableObject
 
     private async Task<bool> LeaveSiteInspectionIfNeededAsync()
     {
-        if (!ReferenceEquals(CurrentViewModel, _siteInspectionVm)) return true;
-        if (!_siteInspectionVm.ConfirmLeave()) return false;
-        await _siteInspectionVm.LeaveAsync();
+        if (ReferenceEquals(CurrentViewModel, _siteInspectionVm))
+        {
+            if (!_siteInspectionVm.ConfirmLeave()) return false;
+            await _siteInspectionVm.LeaveAsync();
+        }
+
+        if (ReferenceEquals(CurrentViewModel, _cameraVm))
+            _cameraVm.Stop();
+
         return true;
     }
 }

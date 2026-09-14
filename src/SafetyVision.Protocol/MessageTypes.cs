@@ -15,6 +15,17 @@ public static class MessageTypes
     public const string StatisticsRequest = nameof(StatisticsRequest);
     public const string StatisticsResponse = nameof(StatisticsResponse);
 
+    public const string EquipmentManagementRequest = nameof(EquipmentManagementRequest);
+    public const string EquipmentManagementResponse = nameof(EquipmentManagementResponse);
+    public const string UserListRequest = nameof(UserListRequest);
+    public const string UserListResponse = nameof(UserListResponse);
+    public const string UserCreateRequest = nameof(UserCreateRequest);
+    public const string UserPasswordChangeRequest = nameof(UserPasswordChangeRequest);
+    public const string UserDeleteRequest = nameof(UserDeleteRequest);
+    public const string UserMutationResponse = nameof(UserMutationResponse);
+    public const string SystemSettingsRequest = nameof(SystemSettingsRequest);
+    public const string SystemSettingsResponse = nameof(SystemSettingsResponse);
+
     public const string InspectionSessionStart = nameof(InspectionSessionStart);
     public const string InspectionSessionStarted = nameof(InspectionSessionStarted);
     public const string FrameMeta = nameof(FrameMeta);
