@@ -263,10 +263,11 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
         var logits = results.First(r => r.Name == _maskOutputName).AsEnumerable<float>().ToArray();
         if (logits.Length < 2) return null;
 
-        // softmax: index 0 = No Mask, index 1 = Mask (모델 config의 id2label 기준).
+        // 이 ViT 분류기의 학습 label 순서는 index 0 = Mask, index 1 = No Mask다.
+        // ONNX 파일에는 id2label metadata가 보존되지 않으므로 원본 모델의 config 순서를 따른다.
         float max = Math.Max(logits[0], logits[1]);
         float e0 = MathF.Exp(logits[0] - max), e1 = MathF.Exp(logits[1] - max);
-        float pNoMask = e0 / (e0 + e1), pMask = e1 / (e0 + e1);
+        float pMask = e0 / (e0 + e1), pNoMask = e1 / (e0 + e1);
 
         var (detectedClass, confidence) = pMask >= pNoMask ? (DetectedClass.Mask, pMask) : (DetectedClass.NoMask, pNoMask);
         if (confidence < _options.MaskClassifierConfidence) return null;
@@ -337,9 +338,14 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
         foreach (var person in personBoxes)
         {
             var headwear = FindHeadwear(person, ppeBoxes);
+            // 사람 전체 박스만으로 얼굴 위치를 추측하면 얼굴이 화면 밖에 있거나 몸을 기울인 장면에서
+            // 팔·옷·안전모를 얼굴로 잘라 마스크로 오판한다. 머리 위치를 확인한 사람만 분류한다.
+            if (headwear is null)
+                continue;
+
             int faceTop = FindFaceTop(source, person);
             faceTop = AdjustFaceTopForHardhat(headwear, faceTop);
-            double faceCenterX = headwear?.CenterX ?? person.CenterX;
+            double faceCenterX = headwear.Value.CenterX;
             var maskBox = ClassifyMask(source, person, faceTop, faceCenterX);
             if (maskBox is not null) boxes.Add(maskBox.Value);
         }
