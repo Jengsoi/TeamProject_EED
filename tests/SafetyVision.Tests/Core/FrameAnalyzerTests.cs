@@ -61,8 +61,8 @@ public class FrameAnalyzerTests
         var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, Options);
         Assert.Equal(PersonRoiCondition.Qualified, eval.Condition);
         Assert.Equal(FrameVote.Positive, eval.Votes[EquipmentCode.Hardhat]);
-        Assert.Equal(FrameVote.NoInfo, eval.Votes[EquipmentCode.Vest]);
-        Assert.Equal(FrameVote.NoInfo, eval.Votes[EquipmentCode.Mask]);
+        Assert.Equal(FrameVote.Negative, eval.Votes[EquipmentCode.Vest]);
+        Assert.Equal(FrameVote.Negative, eval.Votes[EquipmentCode.Mask]);
     }
 
     [Fact]

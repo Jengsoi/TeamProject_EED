@@ -337,6 +337,26 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
     {
         foreach (var person in persons)
         {
+            var headwear = ppeBoxes
+                .Where(b => b.Class is DetectedClass.Hardhat or DetectedClass.NoHardhat)
+                .Where(b => PpeAssociationRules.IsCandidate(b.Class, person, b, _options))
+                .OrderByDescending(b => b.Confidence)
+                .Select(b => (DetectedBox?)b)
+                .FirstOrDefault();
+
+            if (headwear is { } head)
+            {
+                // 최신 전신 검사에서 안전모 내부에 생긴 낮은 Mask 후보가 실제 얼굴 후보를 이겼다.
+                // 마스크 중심은 안전모 하단보다 아래에 있어야 하므로 헬멧 내부 후보는 먼저 버린다.
+                double faceBoundary = head.Y + head.Height * 1.15;
+                ppeBoxes.RemoveAll(b => b.Class is DetectedClass.Mask or DetectedClass.NoMask
+                    && b.CenterY <= faceBoundary
+                    && PpeAssociationRules.IsCandidate(b.Class, person, b, _options));
+                resultBoxes.RemoveAll(b => b.Class is DetectedClass.Mask or DetectedClass.NoMask
+                    && b.CenterY <= faceBoundary
+                    && PpeAssociationRules.IsCandidate(b.Class, person, b, _options));
+            }
+
             var candidates = ppeBoxes
                 .Where(b => b.Class is DetectedClass.Mask or DetectedClass.NoMask)
                 .Where(b => PpeAssociationRules.IsCandidate(b.Class, person, b, _options))

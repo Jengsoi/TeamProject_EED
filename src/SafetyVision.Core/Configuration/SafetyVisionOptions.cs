@@ -48,7 +48,7 @@ public sealed class SafetyVisionOptions
     // 이 클래스의 점수는 0.001 이하로 매우 깨끗하게 낮으므로(별도 검증 완료), NO-Hardhat/NO-Safety Vest와
     // 같은 이유로 Hardhat도 SafetyVest와 별도로 더 낮은 임계값을 쓴다(SafetyVest는 0.40에서도 안정적이라
     // DetectionConfidence를 그대로 쓴다).
-    public double HardhatDetectionConfidence { get; set; } = 0.15;
+    public double HardhatDetectionConfidence { get; set; } = 0.01;
     public double MaskDetectionConfidence { get; set; } = 0.00001;
 
     public double NmsIouThreshold { get; set; } = 0.45;
@@ -59,7 +59,7 @@ public sealed class SafetyVisionOptions
     public double RoiBottom { get; set; } = 0.95;
 
     public double MinPersonHeightRatio { get; set; } = 0.40;
-    public double MaxPersonHeightRatio { get; set; } = 0.92;
+    public double MaxPersonHeightRatio { get; set; } = 0.99;
     public double MaxPersonWidthToHeightRatio { get; set; } = 0.75;
     public double PersonStableDurationSeconds { get; set; } = 0.8;
     public double PersonLeaveDurationSeconds { get; set; } = 1.0;
