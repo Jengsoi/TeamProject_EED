@@ -24,6 +24,8 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     private VideoCapture? _capture;
     private Thread? _captureThread;
     private volatile bool _captureRunning;
+    private int _reportedWidth;
+    private int _reportedHeight;
 
     public SiteInspectionViewModel(ServerConnection connection)
     {
@@ -51,34 +53,35 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     [ObservableProperty] private string currentTimeText = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
     [ObservableProperty] private string? currentInspectionKey;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(RoiBoxWidthRatio))]
-    private double roiLeft = 0.20;
+    [ObservableProperty] private double roiLeft = 0.20;
+    [ObservableProperty] private double roiTop = 0.05;
+    [ObservableProperty] private double roiRight = 0.80;
+    [ObservableProperty] private double roiBottom = 0.95;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(RoiBoxHeightRatio))]
-    private double roiTop = 0.05;
+    // ROI 오버레이의 가운데 컬럼/행(박스)과 마지막 컬럼/행(오른쪽/아래쪽 여백)에 바인딩되는 값.
+    // RoiRight/RoiBottom을 별(star) 가중치로 직접 쓰면 안 되고, 반드시 구간 폭(차이값)으로 변환해야 한다.
+    [ObservableProperty] private double roiBoxWidth = 0.60;
+    [ObservableProperty] private double roiRightMargin = 0.20;
+    [ObservableProperty] private double roiBoxHeight = 0.90;
+    [ObservableProperty] private double roiBottomMargin = 0.05;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(RoiBoxWidthRatio))]
-    [NotifyPropertyChangedFor(nameof(RoiRightMarginRatio))]
-    private double roiRight = 0.80;
+    // 미리보기 Viewbox 내부 Grid의 크기. 카메라의 실제 종횡비와 동일하게 유지해
+    // Stretch로 인한 레터박스와 무관하게 ROI 오버레이가 항상 실제 영상 영역과 일치하도록 한다.
+    [ObservableProperty] private double frameWidth = ClientSettings.CameraWidth;
+    [ObservableProperty] private double frameHeight = ClientSettings.CameraHeight;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(RoiBoxHeightRatio))]
-    [NotifyPropertyChangedFor(nameof(RoiBottomMarginRatio))]
-    private double roiBottom = 0.95;
+    partial void OnRoiLeftChanged(double value) => UpdateRoiSpans();
+    partial void OnRoiTopChanged(double value) => UpdateRoiSpans();
+    partial void OnRoiRightChanged(double value) => UpdateRoiSpans();
+    partial void OnRoiBottomChanged(double value) => UpdateRoiSpans();
 
-    // Grid Star 칸 너비/높이는 절대 비율이 아니라 "그 칸의 몫"이어야 하므로,
-    // ROI 박스 칸은 RoiRight-RoiLeft(폭)/RoiBottom-RoiTop(높이)를, 마지막 칸은 나머지(1-RoiRight/1-RoiBottom)를 써야 한다.
-    public double RoiBoxWidthRatio => RoiRight - RoiLeft;
-    public double RoiRightMarginRatio => 1 - RoiRight;
-    public double RoiBoxHeightRatio => RoiBottom - RoiTop;
-    public double RoiBottomMarginRatio => 1 - RoiBottom;
-
-    // 실제 카메라 해상도(비율). ROI 오버레이를 영상과 같은 고정 비율 캔버스에 겹쳐 항상 정렬되게 한다.
-    [ObservableProperty] private int frameWidth = 1280;
-    [ObservableProperty] private int frameHeight = 720;
+    private void UpdateRoiSpans()
+    {
+        RoiBoxWidth = Math.Max(0.0001, RoiRight - RoiLeft);
+        RoiRightMargin = Math.Max(0.0001, 1 - RoiRight);
+        RoiBoxHeight = Math.Max(0.0001, RoiBottom - RoiTop);
+        RoiBottomMargin = Math.Max(0.0001, 1 - RoiBottom);
+    }
 
     public ObservableCollection<EquipmentDisplayItem> ResultItems { get; } = [];
 
@@ -126,10 +129,14 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
 
         _capture.Set(VideoCaptureProperties.FrameWidth, ClientSettings.CameraWidth);
         _capture.Set(VideoCaptureProperties.FrameHeight, ClientSettings.CameraHeight);
-        int reportedWidth = (int)_capture.Get(VideoCaptureProperties.FrameWidth);
-        int reportedHeight = (int)_capture.Get(VideoCaptureProperties.FrameHeight);
-        FrameWidth = reportedWidth > 0 ? reportedWidth : ClientSettings.CameraWidth;
-        FrameHeight = reportedHeight > 0 ? reportedHeight : ClientSettings.CameraHeight;
+        _reportedWidth = (int)_capture.Get(VideoCaptureProperties.FrameWidth);
+        _reportedHeight = (int)_capture.Get(VideoCaptureProperties.FrameHeight);
+        if (_reportedWidth <= 0) _reportedWidth = ClientSettings.CameraWidth;
+        if (_reportedHeight <= 0) _reportedHeight = ClientSettings.CameraHeight;
+
+        // 미리보기 Viewbox가 실제 카메라 종횡비를 그대로 따라가도록 갱신 (ROI 오버레이 정합성 유지).
+        FrameWidth = _reportedWidth;
+        FrameHeight = _reportedHeight;
 
         await StartSessionAsync();
 
@@ -142,7 +149,7 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     {
         try
         {
-            var envelope = await _connection.RequestAsync(MessageTypes.InspectionSessionStart, new InspectionSessionStartPayload(FrameWidth, FrameHeight, ClientSettings.CameraName));
+            var envelope = await _connection.RequestAsync(MessageTypes.InspectionSessionStart, new InspectionSessionStartPayload(_reportedWidth, _reportedHeight));
             var started = envelope.DeserializePayload<InspectionSessionStartedPayload>();
             if (started.Success)
             {

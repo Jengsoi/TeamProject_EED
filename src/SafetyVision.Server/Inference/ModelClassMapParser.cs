@@ -53,4 +53,20 @@ public static partial class ModelClassMapParser
         error = null;
         return true;
     }
+
+    // 범용 COCO 모델처럼 클래스가 7개로 고정돼 있지 않은 모델에서 이름 하나의 인덱스만 찾을 때 사용한다.
+    // (예: person 탐지 전용 보조 모델에서 "person" 클래스 인덱스만 필요한 경우)
+    public static bool TryFindClassIndex(string namesMetadata, string targetName, out int index)
+    {
+        foreach (Match m in NamesEntryRegex().Matches(namesMetadata))
+        {
+            if (string.Equals(m.Groups[2].Value, targetName, StringComparison.OrdinalIgnoreCase))
+            {
+                index = int.Parse(m.Groups[1].Value);
+                return true;
+            }
+        }
+        index = -1;
+        return false;
+    }
 }

@@ -11,10 +11,6 @@ public static class MessageTypes
     public const string DashboardStatsRequest = nameof(DashboardStatsRequest);
     public const string DashboardStatsResponse = nameof(DashboardStatsResponse);
 
-    // 임시 조치(팀 결정): 원래 문서 스펙은 통계 분석을 "버튼만 구현"으로 두었으나, 실제 화면을 만들기로 함.
-    public const string StatisticsRequest = nameof(StatisticsRequest);
-    public const string StatisticsResponse = nameof(StatisticsResponse);
-
     public const string InspectionSessionStart = nameof(InspectionSessionStart);
     public const string InspectionSessionStarted = nameof(InspectionSessionStarted);
     public const string FrameMeta = nameof(FrameMeta);

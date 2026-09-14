@@ -7,7 +7,7 @@ namespace SafetyVision.Data.Services;
 
 public sealed record EquipmentRate(EquipmentCode Code, double? WornRatio);
 
-public sealed record RecentInspectionRow(long Id, DateTime InspectedAtUtc, string CameraName, string Hardhat, string Vest, string Mask, string Result, bool HasImage);
+public sealed record RecentInspectionRow(long Id, DateTime InspectedAtUtc, string Hardhat, string Vest, string Mask, string Result, bool HasImage);
 
 public sealed record DashboardStats(
     int Total, int Normal, int CheckRequired, int Unconfirmed,
@@ -45,7 +45,7 @@ public sealed class DashboardQueryService(SafetyVisionDbContext db)
             .ToListAsync(ct);
 
         var recent = recentEntities.Select(i => new RecentInspectionRow(
-            i.Id, i.InspectedAt, i.CameraName,
+            i.Id, i.InspectedAt,
             ItemStatus(i, "hardhat"), ItemStatus(i, "vest"), ItemStatus(i, "mask"),
             i.Result, !string.IsNullOrEmpty(i.ImagePath))).ToList();
 

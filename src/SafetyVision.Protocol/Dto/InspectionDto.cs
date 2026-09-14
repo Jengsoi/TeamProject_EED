@@ -1,6 +1,6 @@
 namespace SafetyVision.Protocol.Dto;
 
-public sealed record InspectionSessionStartPayload(int ReportedWidth, int ReportedHeight, string CameraName);
+public sealed record InspectionSessionStartPayload(int ReportedWidth, int ReportedHeight);
 
 public sealed record InspectionSessionStartedPayload(
     bool Success,
