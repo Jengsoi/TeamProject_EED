@@ -24,6 +24,7 @@ public sealed partial class DashboardViewModel(ServerConnection connection) : Ob
 
     [ObservableProperty] private ISeries[] barSeries = [];
     [ObservableProperty] private Axis[] barXAxes = [new Axis { Labels = ["안전모", "안전조끼", "마스크"] }];
+    [ObservableProperty] private Axis[] barYAxes = [new Axis { MinLimit = 0, MaxLimit = 115 }];
     [ObservableProperty] private ISeries[] pieSeries = [];
 
     public ObservableCollection<RecentInspectionPayload> Recent { get; } = [];

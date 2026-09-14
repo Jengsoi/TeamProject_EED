@@ -60,7 +60,7 @@ public sealed class DashboardQueryServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GetStatsAsync_RecentTakesLatest10OrderedByInspectedAtDesc()
+    public async Task GetStatsAsync_RecentTakesLatest5OrderedByInspectedAtDesc()
     {
         for (int i = 0; i < 12; i++)
         {
@@ -70,7 +70,7 @@ public sealed class DashboardQueryServiceTests : IAsyncLifetime
         var stats = await _service.GetStatsAsync(CancellationToken.None);
 
         Assert.Equal(12, stats.Total);
-        Assert.Equal(10, stats.Recent.Count);
+        Assert.Equal(5, stats.Recent.Count);
         // 가장 최근(inspectedAt 가장 큼, i=0)이 먼저 와야 한다.
         Assert.True(stats.Recent[0].InspectedAtUtc >= stats.Recent[^1].InspectedAtUtc);
     }

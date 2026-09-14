@@ -47,7 +47,7 @@
                 <Border Grid.Column="0" Style="{StaticResource CardStyle}">
                     <StackPanel>
                         <TextBlock Text="장비별 현황" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                        <lvc:CartesianChart Series="{Binding BarSeries}" XAxes="{Binding BarXAxes}" Height="220"/>
+                        <lvc:CartesianChart Series="{Binding BarSeries}" XAxes="{Binding BarXAxes}" YAxes="{Binding BarYAxes}" Height="220"/>
                     </StackPanel>
                 </Border>
 

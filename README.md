@@ -11,12 +11,10 @@
 
 ## 2. 모델 준비
 
-- 저장소: `ayushgupta7777/safetyvision-yolov8`, 버전 `v2`, 파일 `v2/best_640.onnx`
-- 배치 경로: `src/SafetyVision.Server/models/safetyvision_v2_640.onnx` (서버 실행 디렉터리 기준 `models/`)
-- **다운로드 날짜**: 2026-09-10
-- **SHA-256**: `EA18AE903A566E8FA76F3EE1C503075522DCA269269315E9C862EFA170430B35`
-- 모델 metadata 검증 결과: 입력명 `images`, 출력명 `output0`, 13개 클래스 중 사용하는 7개(Person/Hardhat/NO-Hardhat/Mask/NO-Mask/Safety Vest/NO-Safety Vest) 모두 이름 매칭 확인됨(서버 기동 로그로 확인, Day1).
-- 모델 파일은 git에 커밋하지 않는다(`.gitignore`). 새 환경에서는 위 링크에서 다시 받아 같은 경로에 배치한다.
+- PPE 모델: `src/SafetyVision.Server/models/safetyvision_v2_896.onnx` (입력 896, 안전모·안전조끼·마스크 후보 검출).
+- 사람 검출 모델: `src/SafetyVision.Server/models/yolov8n.onnx` (입력 640, COCO `names` 메타데이터가 포함된 로컬 파일).
+- 현재 마스크 판정은 PPE 모델의 Mask/NO-Mask 후보를 사용한다. 별도 얼굴·마스크 분류 모델은 실험용이며 서버에서 로드하지 않는다.
+- 서버 모델의 `.onnx` 파일은 `.gitignore` 대상이다. 새 환경에서는 `src/SafetyVision.Server/models/README.md`의 출처를 확인해 두 모델을 같은 경로에 배치한다. 별도 실험 모델은 `experiments/mask-models/`에 있다.
 
 ## 3. 데이터베이스 준비
 
@@ -40,6 +38,7 @@ dotnet ef database update --project src/SafetyVision.Data --startup-project src/
 
 서버는 시작 시 자체적으로 `Database.MigrateAsync()`와 관리자 계정 Seed를 수행하므로, 위 수동 마이그레이션은 스키마를 미리 확인하고 싶을 때만 필요하다.
 **서버 시작 시 MySQL 연결에 실패하면 신규 클라이언트 연결을 거부한다**(정상 동작, 04_DB설계.md 규격).
+Windows의 Debug 실행에서는 `AutoStartLocalMySql`이 켜져 있으면 서버가 포트 3306을 확인하고, MySQL이 꺼져 있을 때 `LocalMySqlExecutable`과 `LocalMySqlConfigFile` 경로로 시작을 시도한다. 설치 경로가 다르면 `src/SafetyVision.Server/appsettings.json`에서 변경한다.
 
 ### MySQL을 Windows 서비스로 등록 (발표 PC, 관리자 권한 필요)
 
@@ -58,6 +57,10 @@ Start-Service MySQL84
 
 ## 5. 실행
 
+Visual Studio에서는 `SafetyVision.slnx`를 열고 시작 프로필 **SafetyVision (서버 + 클라이언트)**를 선택해 F5를 누른다. `SafetyVision.slnLaunch`가 서버와 클라이언트를 함께 시작하도록 설정하며, `SafetyVision.Core` 같은 클래스 라이브러리를 시작 프로젝트로 선택하면 실행 오류가 난다.
+
+터미널에서는 각각 실행한다:
+
 ```powershell
 # 서버
 dotnet run --project src/SafetyVision.Server
@@ -70,15 +73,18 @@ dotnet run --project src/SafetyVision.Client
 
 ## 6. 설정값과 근거
 
-서버 설정 파일: `src/SafetyVision.Server/appsettings.json`. 05_AI모델명세.md 10절의 권장 초기값을 그대로 사용 중이며, 아직 발표 PC 실측(추론 속도·프레임 전송 지연)을 하지 못했다 — 값 변경 시 이유와 함께 이 절에 기록할 것.
+서버 설정 파일: `src/SafetyVision.Server/appsettings.json`. 아래 값은 현재 로컬 설정이며, 옛 문서의 초기 권장값과 다를 수 있다. 추론 속도·프레임 전송 지연은 발표 PC에서 다시 확인한다.
 
 | 항목 | 값 | 상태 |
 |---|---|---|
-| DetectionConfidence | 0.40 | 초기값, 미검증 |
-| NmsIouThreshold | 0.45 | 초기값, 미검증 |
-| TargetAnalysisFrames / MinAnalysisFrames | 12 / 5 | 초기값, 미검증 |
-| MaxInferenceFps | 6 | 초기값, 미검증 |
-| DecisionRatio | 0.70 | 문서 고정값 |
+| ModelInputSize / PersonModelInputSize | 896 / 640 | 현재 ONNX 입력 크기 |
+| DetectionConfidence / MaskDetectionConfidence | 0.40 / 0.00001 | PPE 기본값 / 낮은 마스크 후보 보존 |
+| NmsIouThreshold | 0.45 | 현재 설정 |
+| TargetAnalysisFrames / MinAnalysisFrames | 8 / 5 | 현재 설정 |
+| MaxInferenceFps | 4 | 현재 설정 |
+| DecisionRatio | 0.70 | 현재 설정 |
+
+대시보드의 장비별 현황은 착용률 막대 위의 퍼센트가 잘리지 않도록 위쪽 여백을 두고 표시한다. 최근 검사는 최신 5건만 보여 주며 전체 내역은 검사 이력 화면에서 확인한다.
 
 ## 7. 테스트 실행
 
@@ -125,7 +131,7 @@ dotnet test tests/SafetyVision.Tests
 
 ## 11. 알려진 한계 (아직 실행 검증 필요)
 
-- 실제 웹캠을 통한 검출 품질, 발표 PC 추론 속도, 클라이언트→서버 프레임 전송 지연은 실물 웹캠 환경에서 확인 필요(이 개발 환경은 대화형 데스크톱 세션이 없어 WPF 창을 띄워 육안 확인 불가).
+- 실제 카메라 화면에서 마스크 오인식 사례가 관찰됐다. 안전모·마스크·조끼의 착용/미착용 조합, 발표 PC 추론 속도, 클라이언트→서버 프레임 전송 지연은 추가 현장 검증이 필요하다.
 - 다중 클라이언트 동시 접속은 TCP 세션 격리 수준까지 확인했으나(§10), 실제 웹캠 2대 이상 동시 시연은 미실시.
 - MySQL Windows 서비스 등록은 발표 PC에서 관리자 권한으로 별도 진행 필요.
 - 저장 실패(파일시스템 오류 등) 경로는 코드 레벨 리뷰와 재시도 중복 방지 테스트로만 확인했고, 실제 장애 주입 시연은 하지 않음.

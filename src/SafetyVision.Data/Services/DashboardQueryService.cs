@@ -40,7 +40,7 @@ public sealed class DashboardQueryService(SafetyVisionDbContext db)
 
         var recentEntities = await db.Inspections
             .OrderByDescending(i => i.InspectedAt).ThenByDescending(i => i.Id)
-            .Take(10)
+            .Take(5)
             .Include(i => i.Items)
             .ToListAsync(ct);
 
