@@ -236,13 +236,13 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
     // safetyvision 모델의 Mask/NO-Mask 클래스는 실측 결과 신뢰도가 사실상 0에 가까워(별도 검증 완료) 대신
     // 사람 박스마다 얼굴 영역을 잘라 이진 분류기(Mask/No Mask)에 넣는다. 결과는 Hardhat/SafetyVest와 동일하게
     // 합성 DetectedBox로 만들어 FrameAnalyzer의 기존 연관 판정 로직을 그대로 재사용한다.
-    private DetectedBox? ClassifyMask(Mat source, DetectedBox person, int faceTop)
+    private DetectedBox? ClassifyMask(Mat source, DetectedBox person, int faceTop, double faceCenterX)
     {
         if (_maskSession is null) return null;
 
         double headTop = Math.Max(person.Y, faceTop);
         double cropHalfWidth = _options.MaskClassifierCropHalfWidthRatio * person.Width;
-        double cx = person.CenterX;
+        double cx = faceCenterX;
         int x = (int)Math.Clamp(cx - cropHalfWidth, 0, source.Width);
         int y = (int)Math.Clamp(headTop, 0, source.Height);
         int x2 = (int)Math.Clamp(cx + cropHalfWidth, 0, source.Width);
@@ -274,18 +274,21 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
         return new DetectedBox(detectedClass, x, y, w, h, confidence);
     }
 
-    private int AdjustFaceTopForHardhat(
+    private DetectedBox? FindHeadwear(
         DetectedBox person,
-        IReadOnlyList<DetectedBox> ppeBoxes,
-        int detectedFaceTop)
+        IReadOnlyList<DetectedBox> ppeBoxes)
     {
-        var hardhat = ppeBoxes
-            .Where(b => b.Class == DetectedClass.Hardhat
-                && PpeAssociationRules.IsCandidate(DetectedClass.Hardhat, person, b, _options))
+        return ppeBoxes
+            .Where(b => b.Class is DetectedClass.Hardhat or DetectedClass.NoHardhat)
+            .Where(b => PpeAssociationRules.IsCandidate(b.Class, person, b, _options))
             .OrderByDescending(b => b.Confidence)
+            .Select(b => (DetectedBox?)b)
             .FirstOrDefault();
+    }
 
-        if (hardhat == default)
+    private static int AdjustFaceTopForHardhat(DetectedBox? headwear, int detectedFaceTop)
+    {
+        if (headwear is not { Class: DetectedClass.Hardhat } hardhat)
             return detectedFaceTop;
 
         // 흰색 안전모가 피부색 마스크에 걸리면 FindFaceTop이 헬멧 위쪽을 얼굴로 오인한다.
@@ -333,9 +336,11 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
         // 사람 박스마다 얼굴 영역을 잘라 Mask 분류기를 돌리고, 결과를 합성 DetectedBox로 추가한다.
         foreach (var person in personBoxes)
         {
+            var headwear = FindHeadwear(person, ppeBoxes);
             int faceTop = FindFaceTop(source, person);
-            faceTop = AdjustFaceTopForHardhat(person, ppeBoxes, faceTop);
-            var maskBox = ClassifyMask(source, person, faceTop);
+            faceTop = AdjustFaceTopForHardhat(headwear, faceTop);
+            double faceCenterX = headwear?.CenterX ?? person.CenterX;
+            var maskBox = ClassifyMask(source, person, faceTop, faceCenterX);
             if (maskBox is not null) boxes.Add(maskBox.Value);
         }
 
