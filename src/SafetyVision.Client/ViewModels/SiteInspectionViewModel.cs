@@ -24,6 +24,12 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     private VideoCapture? _capture;
     private Thread? _captureThread;
     private volatile bool _captureRunning;
+    private int _reportedWidth;
+    private int _reportedHeight;
+    private readonly SemaphoreSlim _frameSendGate = new(1, 1);
+    private int _cameraFailureReported;
+    private int _reconnectRunning;
+    private bool _isEntered;
 
     public SiteInspectionViewModel(ServerConnection connection)
     {
@@ -51,34 +57,35 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     [ObservableProperty] private string currentTimeText = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
     [ObservableProperty] private string? currentInspectionKey;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(RoiBoxWidthRatio))]
-    private double roiLeft = 0.20;
+    [ObservableProperty] private double roiLeft = 0.20;
+    [ObservableProperty] private double roiTop = 0.05;
+    [ObservableProperty] private double roiRight = 0.80;
+    [ObservableProperty] private double roiBottom = 0.95;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(RoiBoxHeightRatio))]
-    private double roiTop = 0.05;
+    // ROI 오버레이의 가운데 컬럼/행(박스)과 마지막 컬럼/행(오른쪽/아래쪽 여백)에 바인딩되는 값.
+    // RoiRight/RoiBottom을 별(star) 가중치로 직접 쓰면 안 되고, 반드시 구간 폭(차이값)으로 변환해야 한다.
+    [ObservableProperty] private double roiBoxWidth = 0.60;
+    [ObservableProperty] private double roiRightMargin = 0.20;
+    [ObservableProperty] private double roiBoxHeight = 0.90;
+    [ObservableProperty] private double roiBottomMargin = 0.05;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(RoiBoxWidthRatio))]
-    [NotifyPropertyChangedFor(nameof(RoiRightMarginRatio))]
-    private double roiRight = 0.80;
+    // 미리보기 Viewbox 내부 Grid의 크기. 카메라의 실제 종횡비와 동일하게 유지해
+    // Stretch로 인한 레터박스와 무관하게 ROI 오버레이가 항상 실제 영상 영역과 일치하도록 한다.
+    [ObservableProperty] private double frameWidth = ClientSettings.CameraWidth;
+    [ObservableProperty] private double frameHeight = ClientSettings.CameraHeight;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(RoiBoxHeightRatio))]
-    [NotifyPropertyChangedFor(nameof(RoiBottomMarginRatio))]
-    private double roiBottom = 0.95;
+    partial void OnRoiLeftChanged(double value) => UpdateRoiSpans();
+    partial void OnRoiTopChanged(double value) => UpdateRoiSpans();
+    partial void OnRoiRightChanged(double value) => UpdateRoiSpans();
+    partial void OnRoiBottomChanged(double value) => UpdateRoiSpans();
 
-    // Grid Star 칸 너비/높이는 절대 비율이 아니라 "그 칸의 몫"이어야 하므로,
-    // ROI 박스 칸은 RoiRight-RoiLeft(폭)/RoiBottom-RoiTop(높이)를, 마지막 칸은 나머지(1-RoiRight/1-RoiBottom)를 써야 한다.
-    public double RoiBoxWidthRatio => RoiRight - RoiLeft;
-    public double RoiRightMarginRatio => 1 - RoiRight;
-    public double RoiBoxHeightRatio => RoiBottom - RoiTop;
-    public double RoiBottomMarginRatio => 1 - RoiBottom;
-
-    // 실제 카메라 해상도(비율). ROI 오버레이를 영상과 같은 고정 비율 캔버스에 겹쳐 항상 정렬되게 한다.
-    [ObservableProperty] private int frameWidth = 1280;
-    [ObservableProperty] private int frameHeight = 720;
+    private void UpdateRoiSpans()
+    {
+        RoiBoxWidth = Math.Max(0.0001, RoiRight - RoiLeft);
+        RoiRightMargin = Math.Max(0.0001, 1 - RoiRight);
+        RoiBoxHeight = Math.Max(0.0001, RoiBottom - RoiTop);
+        RoiBottomMargin = Math.Max(0.0001, 1 - RoiBottom);
+    }
 
     public ObservableCollection<EquipmentDisplayItem> ResultItems { get; } = [];
 
@@ -96,9 +103,13 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
 
     public event Action? ReturnToDashboardRequested;
     public event Func<bool>? ConfirmDiscardUnsavedRequested;
+    public event Action? ReauthenticationRequired;
 
     public async Task EnterAsync()
     {
+        if (_isEntered) return;
+        _isEntered = true;
+        Interlocked.Exchange(ref _cameraFailureReported, 0);
         State = "WAITING";
         Guidance = "검사 영역 안에 서 주세요.";
         SaveState = "NONE";
@@ -121,15 +132,24 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
             CameraErrorMessage = "카메라를 사용할 수 없습니다. 연결을 확인해 주세요.";
             try { await _connection.SendAsync(MessageTypes.InspectionSessionEnd, new InspectionSessionEndPayload("camera_error")); }
             catch (Exception) { /* 세션이 이미 없으면 무시 */ }
+            _capture.Dispose();
+            _capture = null;
+            UnsubscribeConnectionEvents();
+            _clockTimer.Stop();
+            _isEntered = false;
             return;
         }
 
         _capture.Set(VideoCaptureProperties.FrameWidth, ClientSettings.CameraWidth);
         _capture.Set(VideoCaptureProperties.FrameHeight, ClientSettings.CameraHeight);
-        int reportedWidth = (int)_capture.Get(VideoCaptureProperties.FrameWidth);
-        int reportedHeight = (int)_capture.Get(VideoCaptureProperties.FrameHeight);
-        FrameWidth = reportedWidth > 0 ? reportedWidth : ClientSettings.CameraWidth;
-        FrameHeight = reportedHeight > 0 ? reportedHeight : ClientSettings.CameraHeight;
+        _reportedWidth = (int)_capture.Get(VideoCaptureProperties.FrameWidth);
+        _reportedHeight = (int)_capture.Get(VideoCaptureProperties.FrameHeight);
+        if (_reportedWidth <= 0) _reportedWidth = ClientSettings.CameraWidth;
+        if (_reportedHeight <= 0) _reportedHeight = ClientSettings.CameraHeight;
+
+        // 미리보기 Viewbox가 실제 카메라 종횡비를 그대로 따라가도록 갱신 (ROI 오버레이 정합성 유지).
+        FrameWidth = _reportedWidth;
+        FrameHeight = _reportedHeight;
 
         await StartSessionAsync();
 
@@ -142,7 +162,8 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     {
         try
         {
-            var envelope = await _connection.RequestAsync(MessageTypes.InspectionSessionStart, new InspectionSessionStartPayload(FrameWidth, FrameHeight, ClientSettings.CameraName));
+            var envelope = await _connection.RequestAsync(MessageTypes.InspectionSessionStart,
+                new InspectionSessionStartPayload(_reportedWidth, _reportedHeight, "CAM 01"));
             var started = envelope.DeserializePayload<InspectionSessionStartedPayload>();
             if (started.Success)
             {
@@ -165,18 +186,31 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
 
     public async Task LeaveAsync()
     {
+        if (!_isEntered) return;
+        _isEntered = false;
         _clockTimer.Stop();
         _captureRunning = false;
-        _captureThread?.Join(500);
-        _capture?.Release();
-        _capture?.Dispose();
+        var capture = _capture;
+        var captureThread = _captureThread;
         _capture = null;
+        bool captureStopped = captureThread?.Join(2000) ?? true;
+        if (captureStopped)
+        {
+            capture?.Release();
+            capture?.Dispose();
+        }
+        else if (captureThread is not null && capture is not null)
+        {
+            _ = Task.Run(() =>
+            {
+                captureThread.Join();
+                capture.Release();
+                capture.Dispose();
+            });
+        }
+        _captureThread = null;
 
-        _connection.StateChanged -= OnStateChanged;
-        _connection.ResultReceived -= OnResultReceived;
-        _connection.SaveAckReceived -= OnSaveAckReceived;
-        _connection.ErrorReceived -= OnErrorReceived;
-        _connection.Disconnected -= OnDisconnected;
+        UnsubscribeConnectionEvents();
 
         try { await _connection.SendAsync(MessageTypes.InspectionSessionEnd, new InspectionSessionEndPayload(null)); }
         catch (Exception) { /* 연결이 이미 끊겼으면 무시 */ }
@@ -184,18 +218,27 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
 
     private void CaptureLoop()
     {
+        var capture = _capture;
+        if (capture is null) return;
         using var mat = new Mat();
         var sendInterval = TimeSpan.FromSeconds(1.0 / ClientSettings.MaxFrameSendFps);
         var lastSend = DateTime.MinValue;
         long seq = 0;
+        int consecutiveReadFailures = 0;
 
         while (_captureRunning)
         {
-            if (_capture is null || !_capture.Read(mat) || mat.Empty())
+            if (!capture.Read(mat) || mat.Empty())
             {
                 Thread.Sleep(15);
+                if (++consecutiveReadFailures >= 100)
+                {
+                    _captureRunning = false;
+                    _ = ReportCameraFailureAsync();
+                }
                 continue;
             }
+            consecutiveReadFailures = 0;
 
             try
             {
@@ -222,8 +265,31 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
 
     private async Task SendFrameSafeAsync(FrameMetaPayload meta, byte[] jpeg)
     {
+        if (!await _frameSendGate.WaitAsync(0)) return;
         try { await _connection.SendFrameAsync(meta, jpeg); }
         catch (Exception) { /* 연결 문제는 Disconnected 이벤트로 처리한다 */ }
+        finally { _frameSendGate.Release(); }
+    }
+
+    private async Task ReportCameraFailureAsync()
+    {
+        if (Interlocked.Exchange(ref _cameraFailureReported, 1) != 0) return;
+        await _dispatcher.InvokeAsync(() =>
+        {
+            CameraErrorMessage = "카메라 연결이 끊겼습니다. 장치를 확인한 뒤 검사 화면에 다시 진입해 주세요.";
+            Guidance = "검사가 중단되었습니다.";
+        });
+        try { await _connection.SendAsync(MessageTypes.InspectionSessionEnd, new InspectionSessionEndPayload("camera_disconnected")); }
+        catch (Exception) { /* 연결 종료와 동시에 발생할 수 있음 */ }
+    }
+
+    private void UnsubscribeConnectionEvents()
+    {
+        _connection.StateChanged -= OnStateChanged;
+        _connection.ResultReceived -= OnResultReceived;
+        _connection.SaveAckReceived -= OnSaveAckReceived;
+        _connection.ErrorReceived -= OnErrorReceived;
+        _connection.Disconnected -= OnDisconnected;
     }
 
     private void OnStateChanged(InspectionStateChangedPayload payload)
@@ -283,25 +349,35 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     private void OnDisconnected()
     {
         _dispatcher.BeginInvoke(() => ConnectionMessage = "서버 연결이 끊겼습니다. 재연결을 시도합니다.");
-        _ = TryReconnectAsync();
+        if (Interlocked.CompareExchange(ref _reconnectRunning, 1, 0) == 0)
+            _ = TryReconnectAsync();
     }
 
     private async Task TryReconnectAsync()
     {
-        bool ok = await _connection.ConnectWithRetryAsync(5, TimeSpan.FromSeconds(2));
-        await _dispatcher.InvokeAsync(async () =>
+        try
         {
-            if (ok)
+            bool ok = await _connection.ConnectWithRetryAsync(5, TimeSpan.FromSeconds(2));
+            await _dispatcher.InvokeAsync(async () =>
             {
-                ConnectionMessage = null;
-                State = "WAITING"; // 재연결은 새 세션으로 간주하며 이전 상태를 복구하지 않는다.
-                await StartSessionAsync();
-            }
-            else
-            {
-                ConnectionMessage = "서버에 연결할 수 없습니다. 연결을 확인해 주세요.";
-            }
-        });
+                if (ok && _isEntered)
+                {
+                    // 서버의 새 TCP 세션은 인증되지 않은 상태다. 이전 로그인 권한을 암묵적으로
+                    // 승계하지 않고 로그인 화면으로 돌아가 새 세션을 인증한다.
+                    ConnectionMessage = "서버에 다시 연결했습니다. 다시 로그인해 주세요.";
+                    await LeaveAsync();
+                    ReauthenticationRequired?.Invoke();
+                }
+                else if (!ok && _isEntered)
+                {
+                    ConnectionMessage = "서버에 연결할 수 없습니다. 연결을 확인해 주세요.";
+                }
+            });
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _reconnectRunning, 0);
+        }
     }
 
     [RelayCommand]

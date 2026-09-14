@@ -32,6 +32,39 @@ public class InspectionStateMachineTests
     }
 
     [Fact]
+    public void ShortDetectionGapDuringPersonDetected_DoesNotResetStabilization()
+    {
+        // 모델 confidence가 순간적으로 흔들려 한 프레임만 사람을 놓쳐도, PersonLeaveDurationSeconds(1.0초) 이내면
+        // 안정화 진행(_stableSince/_stableObservationCount)을 유지해야 한다.
+        var sm = new InspectionStateMachine(new SafetyVisionOptions());
+
+        sm.ProcessFrame(Qualified(), 0.0);
+        Assert.Equal(InspectionState.PersonDetected, sm.State);
+
+        sm.ProcessFrame(FrameEvaluation.None, 0.3); // 짧은 흔들림
+        Assert.Equal(InspectionState.PersonDetected, sm.State);
+
+        sm.ProcessFrame(Qualified(), 0.9); // 0.0초부터 0.9초 경과, 2회째 Qualified 관측
+        Assert.Equal(InspectionState.Inspecting, sm.State);
+    }
+
+    [Fact]
+    public void LongDetectionGapDuringPersonDetected_ResetsToWaiting()
+    {
+        // 1초 이상 계속 사람이 안 잡히면 실제로 자리를 떠난 것으로 보고 초기화해야 한다.
+        var sm = new InspectionStateMachine(new SafetyVisionOptions());
+
+        sm.ProcessFrame(Qualified(), 0.0);
+        Assert.Equal(InspectionState.PersonDetected, sm.State);
+
+        sm.ProcessFrame(FrameEvaluation.None, 0.5); // 1초 미만: 유지
+        Assert.Equal(InspectionState.PersonDetected, sm.State);
+
+        sm.ProcessFrame(FrameEvaluation.None, 1.6); // 0.5초부터 1.1초 경과: 리셋
+        Assert.Equal(InspectionState.Waiting, sm.State);
+    }
+
+    [Fact]
     public void MultipleDuringInspecting_CancelsWithoutSaving()
     {
         var sm = new InspectionStateMachine(new SafetyVisionOptions());
@@ -90,10 +123,8 @@ public class InspectionStateMachineTests
     }
 
     [Fact]
-    public void MaxDurationWithFewFrames_CompletesAsUnknownItemsButCheckRequiredOverall()
+    public void MaxDurationWithFewFrames_CompletesAsUnknown()
     {
-        // 개별 장비는 미확인(Unknown)을 유지하지만, 최종 결과는 2가지(정상/점검 필요)로 단순화되어
-        // "미확인 장비가 있으면 점검 필요"로 귀결된다(InspectionOutcomeCalculator 참고).
         var sm = new InspectionStateMachine(new SafetyVisionOptions());
         EnterInspecting(sm, startNow: 0.0);
 
@@ -102,7 +133,7 @@ public class InspectionStateMachineTests
         Assert.True(completedNow);
         Assert.Equal(InspectionState.Result, sm.State);
         Assert.All(sm.Outcome!.Items, item => Assert.Equal(EquipmentStatus.Unknown, item.Status));
-        Assert.Equal(InspectionResultType.CheckRequired, sm.Outcome!.Result);
+        Assert.Equal(InspectionResultType.Unconfirmed, sm.Outcome!.Result);
         Assert.Equal(-1, sm.Outcome!.RepresentativeFrameIndex);
     }
 

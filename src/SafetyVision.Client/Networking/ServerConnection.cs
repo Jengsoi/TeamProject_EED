@@ -11,12 +11,16 @@ namespace SafetyVision.Client.Networking;
 public sealed class ServerConnection(string host, int port) : IDisposable
 {
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<Envelope>> _pending = new();
     private readonly ConcurrentDictionary<Guid, byte[]> _pendingImages = new();
 
     private TcpClient? _client;
     private NetworkStream? _stream;
     private CancellationTokenSource? _readLoopCts;
+    private Task? _readLoopTask;
+    private long _connectionGeneration;
+    private bool _disposed;
 
     public bool IsConnected { get; private set; }
 
@@ -28,23 +32,35 @@ public sealed class ServerConnection(string host, int port) : IDisposable
 
     public async Task<bool> ConnectAsync(CancellationToken ct = default)
     {
+        await _connectionLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            if (_disposed) return false;
+            IsConnected = false;
+            _readLoopCts?.Cancel();
             _client?.Close();
-            _client = new TcpClient();
-            await _client.ConnectAsync(host, port, ct).ConfigureAwait(false);
-            _stream = _client.GetStream();
+
+            var client = new TcpClient();
+            await client.ConnectAsync(host, port, ct).ConfigureAwait(false);
+            var stream = client.GetStream();
+            _client = client;
+            _stream = stream;
             IsConnected = true;
 
-            _readLoopCts?.Cancel();
-            _readLoopCts = new CancellationTokenSource();
-            _ = Task.Run(() => ReadLoopAsync(_readLoopCts.Token), CancellationToken.None);
+            var readLoopCts = new CancellationTokenSource();
+            _readLoopCts = readLoopCts;
+            long generation = Interlocked.Increment(ref _connectionGeneration);
+            _readLoopTask = Task.Run(() => ReadLoopAsync(stream, generation, readLoopCts.Token), CancellationToken.None);
             return true;
         }
         catch (Exception)
         {
             IsConnected = false;
             return false;
+        }
+        finally
+        {
+            _connectionLock.Release();
         }
     }
 
@@ -130,13 +146,13 @@ public sealed class ServerConnection(string host, int port) : IDisposable
         }
     }
 
-    private async Task ReadLoopAsync(CancellationToken ct)
+    private async Task ReadLoopAsync(NetworkStream stream, long generation, CancellationToken ct)
     {
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                var envelope = await ProtocolMessage.ReceiveEnvelopeAsync(_stream!, ct).ConfigureAwait(false);
+                var envelope = await ProtocolMessage.ReceiveEnvelopeAsync(stream, ct).ConfigureAwait(false);
 
                 // 07_통신프로토콜.md §4: imageAvailable=true인 InspectionResult/InspectionDetailResponse는
                 // 바로 뒤에 0x02 이미지 프레임이 온다. 다음 envelope를 읽기 전에 반드시 먼저 소비해야 한다.
@@ -144,7 +160,7 @@ public sealed class ServerConnection(string host, int port) : IDisposable
                 {
                     var payload = envelope.DeserializePayload<InspectionResultPayload>();
                     byte[]? image = payload.ImageAvailable
-                        ? await ProtocolMessage.ReceiveImageAsync(_stream!, ct).ConfigureAwait(false)
+                        ? await ProtocolMessage.ReceiveImageAsync(stream, ct).ConfigureAwait(false)
                         : null;
                     if (_pending.TryRemove(envelope.CorrelationId, out var tcsResult)) tcsResult.TrySetResult(envelope);
                     ResultReceived?.Invoke(payload, image);
@@ -156,7 +172,7 @@ public sealed class ServerConnection(string host, int port) : IDisposable
                     var payload = envelope.DeserializePayload<InspectionDetailResponsePayload>();
                     if (payload.ImageAvailable)
                     {
-                        var image = await ProtocolMessage.ReceiveImageAsync(_stream!, ct).ConfigureAwait(false);
+                        var image = await ProtocolMessage.ReceiveImageAsync(stream, ct).ConfigureAwait(false);
                         _pendingImages[envelope.CorrelationId] = image;
                     }
                     if (_pending.TryRemove(envelope.CorrelationId, out var tcsDetail)) tcsDetail.TrySetResult(envelope);
@@ -189,17 +205,25 @@ public sealed class ServerConnection(string host, int port) : IDisposable
         }
         finally
         {
-            IsConnected = false;
-            foreach (var kvp in _pending) kvp.Value.TrySetException(new IOException("서버 연결이 끊어졌습니다."));
-            _pending.Clear();
-            Disconnected?.Invoke();
+            if (Interlocked.Read(ref _connectionGeneration) == generation)
+            {
+                IsConnected = false;
+                foreach (var kvp in _pending) kvp.Value.TrySetException(new IOException("서버 연결이 끊어졌습니다."));
+                _pending.Clear();
+                Disconnected?.Invoke();
+            }
         }
     }
 
     public void Dispose()
     {
+        _disposed = true;
+        Interlocked.Increment(ref _connectionGeneration);
         _readLoopCts?.Cancel();
         try { _client?.Close(); } catch (Exception) { /* 정리 중 예외 무시 */ }
-        _writeLock.Dispose();
+        IsConnected = false;
+        foreach (var kvp in _pending)
+            kvp.Value.TrySetException(new ObjectDisposedException(nameof(ServerConnection)));
+        _pending.Clear();
     }
 }

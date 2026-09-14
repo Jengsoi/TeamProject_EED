@@ -36,7 +36,7 @@ public sealed class InspectionStateMachine
     // true를 반환하면 이번 호출로 RESULT에 막 진입했다는 뜻이며, Server는 즉시 최초 저장을 시작해야 한다.
     public bool ProcessFrame(FrameEvaluation eval, double nowSeconds) => State switch
     {
-        InspectionState.Waiting => ProcessWaiting(eval),
+        InspectionState.Waiting => ProcessWaiting(eval, nowSeconds),
         InspectionState.PersonDetected => ProcessPersonDetected(eval, nowSeconds),
         InspectionState.Inspecting => ProcessInspecting(eval, nowSeconds),
         InspectionState.Result => ProcessResult(eval, nowSeconds),
@@ -91,15 +91,16 @@ public sealed class InspectionStateMachine
         ResetForNextWaiting();
     }
 
-    private bool ProcessWaiting(FrameEvaluation eval)
+    private bool ProcessWaiting(FrameEvaluation eval, double now)
     {
         switch (eval.Condition)
         {
             case PersonRoiCondition.Qualified:
                 State = InspectionState.PersonDetected;
-                // nowSeconds는 다음 프레임에서 갱신되므로 최초 관측 시각은 PersonDetected 첫 호출에서 기록한다.
-                _stableSince = null;
-                _stableObservationCount = 0;
+                // 전환을 유발한 이번 프레임도 최초 Qualified 관측으로 카운트해야, 다음 프레임에서
+                // 짧은 흔들림(None)이 끼어들어도 안정화 진행이 한 프레임만큼 밀리지 않는다.
+                _stableSince = now;
+                _stableObservationCount = 1;
                 GuidanceMessage = InspectionMessages.StableDetected;
                 break;
             case PersonRoiCondition.Multiple:
@@ -117,32 +118,57 @@ public sealed class InspectionStateMachine
 
     private bool ProcessPersonDetected(FrameEvaluation eval, double now)
     {
-        if (eval.Condition != PersonRoiCondition.Qualified)
+        switch (eval.Condition)
         {
-            State = InspectionState.Waiting;
-            _stableSince = null;
-            _stableObservationCount = 0;
-            GuidanceMessage = eval.Condition switch
-            {
-                PersonRoiCondition.Multiple => InspectionMessages.MultiplePersons,
-                PersonRoiCondition.TooSmall => InspectionMessages.TooSmall,
-                _ => InspectionMessages.Waiting
-            };
-            return false;
-        }
+            case PersonRoiCondition.Multiple:
+            case PersonRoiCondition.TooSmall:
+                // 여러 명 / 너무 작음은 명확한 이탈 사유이므로 유예 없이 즉시 초기화한다.
+                ResetToWaiting(eval.Condition);
+                return false;
 
-        _stableSince ??= now;
-        _stableObservationCount++;
+            case PersonRoiCondition.None:
+                // 모델 confidence가 순간적으로 흔들려 한두 프레임 동안 사람이 아예 안 잡히는 경우를 대비해,
+                // Inspecting 단계(PersonLeaveDurationSeconds)와 동일하게 짧은 유예를 준다.
+                // 유예 중에는 _stableSince/_stableObservationCount를 그대로 유지해 안정화 진행을 보존한다.
+                _absentSince ??= now;
+                if (now - _absentSince.Value >= _options.PersonLeaveDurationSeconds)
+                {
+                    ResetToWaiting(eval.Condition);
+                }
+                return false;
 
-        if (_stableObservationCount >= 2 && now - _stableSince.Value >= _options.PersonStableDurationSeconds)
-        {
-            StartInspecting(now);
+            case PersonRoiCondition.Qualified:
+                _absentSince = null;
+                _stableSince ??= now;
+                _stableObservationCount++;
+
+                if (_stableObservationCount >= 2 && now - _stableSince.Value >= _options.PersonStableDurationSeconds)
+                {
+                    StartInspecting(now);
+                }
+                else
+                {
+                    GuidanceMessage = InspectionMessages.StableDetected;
+                }
+                return false;
+
+            default:
+                return false;
         }
-        else
+    }
+
+    private void ResetToWaiting(PersonRoiCondition condition)
+    {
+        State = InspectionState.Waiting;
+        _stableSince = null;
+        _stableObservationCount = 0;
+        _absentSince = null;
+        GuidanceMessage = condition switch
         {
-            GuidanceMessage = InspectionMessages.StableDetected;
-        }
-        return false;
+            PersonRoiCondition.Multiple => InspectionMessages.MultiplePersons,
+            PersonRoiCondition.TooSmall => InspectionMessages.TooSmall,
+            _ => InspectionMessages.Waiting
+        };
     }
 
     private bool ProcessInspecting(FrameEvaluation eval, double now)

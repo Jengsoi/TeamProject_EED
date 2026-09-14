@@ -5,7 +5,7 @@ using Xunit;
 
 namespace SafetyVision.Tests.Core;
 
-// 05_AI모델명세.md 7절 예제 표를 그대로 검증한다. 개별 장비 판정은 3가지(착용/미착용/미확인)를 유지한다.
+// 05_AI모델명세.md 7절 예제 표를 그대로 검증한다.
 public class EquipmentJudgeTests
 {
     private static readonly SafetyVisionOptions Options = new();

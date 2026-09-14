@@ -37,7 +37,7 @@ public sealed partial class LoginViewModel : ObservableObject
         var connection = new ServerConnection(ClientSettings.ServerHost, ClientSettings.ServerPort);
         try
         {
-            bool connected = await connection.ConnectWithRetryAsync(10, TimeSpan.FromSeconds(1.5));
+            bool connected = await connection.ConnectWithRetryAsync(3, TimeSpan.FromSeconds(1.5));
             if (!connected)
             {
                 ErrorMessage = "서버에 연결할 수 없습니다. 연결을 확인해 주세요.";
