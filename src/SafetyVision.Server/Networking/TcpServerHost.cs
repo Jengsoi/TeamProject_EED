@@ -19,9 +19,10 @@ public sealed class TcpServerHost(
 
     public async Task RunAsync(CancellationToken ct)
     {
-        var listener = new TcpListener(IPAddress.Any, options.ListenPort);
+        var listenAddress = IPAddress.Parse(options.ListenAddress);
+        var listener = new TcpListener(listenAddress, options.ListenPort);
         listener.Start();
-        logger.LogInformation("TCP 서버 시작: 포트 {Port}", options.ListenPort);
+        logger.LogInformation("TCP 서버 시작: 주소 {Address}, 포트 {Port}", options.ListenAddress, options.ListenPort);
 
         var sessionTasks = new List<Task>();
         try

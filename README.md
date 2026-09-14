@@ -11,12 +11,20 @@
 
 ## 2. 모델 준비
 
-- 저장소: `ayushgupta7777/safetyvision-yolov8`, 버전 `v2`, 파일 `v2/best_640.onnx`
-- 배치 경로: `src/SafetyVision.Server/models/safetyvision_v2_640.onnx` (서버 실행 디렉터리 기준 `models/`)
-- **다운로드 날짜**: 2026-09-10
-- **SHA-256**: `EA18AE903A566E8FA76F3EE1C503075522DCA269269315E9C862EFA170430B35`
-- 모델 metadata 검증 결과: 입력명 `images`, 출력명 `output0`, 13개 클래스 중 사용하는 7개(Person/Hardhat/NO-Hardhat/Mask/NO-Mask/Safety Vest/NO-Safety Vest) 모두 이름 매칭 확인됨(서버 기동 로그로 확인, Day1).
-- 모델 파일은 git에 커밋하지 않는다(`.gitignore`). 새 환경에서는 위 링크에서 다시 받아 같은 경로에 배치한다.
+현재 `appsettings.json` 기준으로 서버에는 아래 두 파일이 필요하다. 모델 파일은 git에 커밋하지 않으므로(`.gitignore`) 별도로 받아 `src/SafetyVision.Server/models/`에 둔다(빌드 시 출력 폴더로 복사된다).
+
+| 파일 | 설정 | 용도 |
+|---|---|---|
+| `safetyvision_v2_896.onnx` | `ModelPath`, `ModelInputSize` 896, `ModelVersion` `v2-896` | PPE 판정 모델 |
+| `yolov8n.onnx` | `PersonModelPath`, `PersonModelInputSize` 640 | 범용 COCO Person 검출 모델 |
+
+- **TODO**: 두 파일의 출처 URL·다운로드 날짜·SHA-256은 모델을 받은 담당자가 기록한다(저장소에 기록 없음).
+- `yolov8n.onnx`는 Ultralytics 모델이므로 사용 전에 AGPL-3.0 라이선스 조건을 확인한다.
+- `yolov8n.onnx`가 없으면 PPE 모델 자체의 Person 결과로 대체하지만, 그 클래스의 신뢰도는 실측상 사실상 0이라 검사가 시작되지 않는다.
+- `safetyvision_v2_896.onnx`가 없으면 서버는 기동하지만 검사 요청에 `MODEL_UNAVAILABLE`로 응답한다.
+- `mask_classifier.onnx`는 사용하지 않는다(마스크는 PPE 모델의 Mask/NO-Mask 결과로 판정).
+
+이전에 사용한 640 입력 모델(`ayushgupta7777/safetyvision-yolov8`의 `v2/best_640.onnx`, 2026-09-10 다운로드, SHA-256 `EA18AE903A566E8FA76F3EE1C503075522DCA269269315E9C862EFA170430B35`, 입력명 `images`, 출력명 `output0`, 사용 클래스 7개 이름 매칭 확인)을 쓰려면 `ModelPath`·`ModelInputSize`(640)·`ModelVersion`을 함께 바꾼다.
 
 ## 3. 데이터베이스 준비
 
@@ -27,8 +35,10 @@ GRANT ALL PRIVILEGES ON safetyvision.* TO 'safetyvision_app'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
-연결 문자열은 `src/SafetyVision.Server/appsettings.json`의 `ConnectionStrings:MySql`에 설정한다.
+`src/SafetyVision.Server/appsettings.json`의 `ConnectionStrings:MySql`에는 비밀번호를 넣지 않는다. 서버 실행 시 환경변수 `ConnectionStrings__MySql`로 비밀번호를 포함한 전체 연결 문자열을 주입한다(5절). 비밀번호가 없으면 서버는 설정 오류로 시작하지 않는다.
 **비밀번호는 이 문서에 원문으로 남기지 않는다** — 발표 환경 값은 팀 내 별도 공유.
+
+> **보안 주의**: 이전 커밋 기록의 `appsettings.json`에 `safetyvision_app` 비밀번호가 평문으로 올라가 있었고 저장소는 공개 상태다. 파일에서 지워도 git 기록에는 남으므로, 운영·발표 환경의 `safetyvision_app` 비밀번호를 반드시 새 값으로 바꾼다.
 
 마이그레이션 적용(최초 1회, 이후 서버가 기동 시 자동 적용):
 
@@ -59,25 +69,34 @@ Start-Service MySQL84
 ## 5. 실행
 
 ```powershell
-# 서버
+# 서버 (저장소 루트에서 실행해도 출력 폴더의 appsettings.json과 models/를 사용한다)
+$env:ConnectionStrings__MySql = "Server=localhost;Port=3306;Database=safetyvision;User=safetyvision_app;Password=<비밀번호>;SslMode=None;AllowPublicKeyRetrieval=True;"
 dotnet run --project src/SafetyVision.Server
 
 # 클라이언트 (별도 터미널/PC)
 dotnet run --project src/SafetyVision.Client
 ```
 
-서버 기본 리슨 포트: `8910` (`appsettings.json`의 `ListenPort`).
+서버 기본 리슨 주소/포트: `127.0.0.1:8910` (`appsettings.json`의 `ListenAddress`/`ListenPort`). 로그인 비밀번호가 평문 TCP로 오가므로, 다른 PC에서 접속해야 할 때만 `ListenAddress`를 사설망 IP로 바꾼다.
+환경변수는 `appsettings.json` 값보다 우선한다(예: `$env:ListenPort = "8911"`).
 
 ## 6. 설정값과 근거
 
-서버 설정 파일: `src/SafetyVision.Server/appsettings.json`. 05_AI모델명세.md 10절의 권장 초기값을 그대로 사용 중이며, 아직 발표 PC 실측(추론 속도·프레임 전송 지연)을 하지 못했다 — 값 변경 시 이유와 함께 이 절에 기록할 것.
+서버 설정 파일: `src/SafetyVision.Server/appsettings.json`. 값 변경 시 이유와 함께 이 절에 기록할 것. 아래 표는 현재 파일 값이며, 명세(02_요구사항.md FR-06, 05_AI모델명세.md)와 다른 값은 표시했다.
 
-| 항목 | 값 | 상태 |
+| 항목 | 값 | 근거·상태 |
 |---|---|---|
-| DetectionConfidence | 0.40 | 초기값, 미검증 |
-| NmsIouThreshold | 0.45 | 초기값, 미검증 |
-| TargetAnalysisFrames / MinAnalysisFrames | 12 / 5 | 초기값, 미검증 |
-| MaxInferenceFps | 6 | 초기값, 미검증 |
+| ModelInputSize | 896 | `safetyvision_v2_896.onnx` 입력 크기 |
+| DetectionConfidence | 0.40 | 착용 클래스 기본값(SafetyVest는 0.40에서 안정적) |
+| NoWearDetectionConfidence | 0.05 | 미착용 클래스 실측 신뢰도가 0.01~0.23대로 낮음 |
+| HardhatDetectionConfidence | 0.01 | 착용 중에도 각도·조명에 따라 신뢰도가 크게 떨어지는 실측. 같은 사람의 NO-Hardhat과는 신뢰도 비교로 충돌 해소 |
+| MaskDetectionConfidence | 0.05 | 신뢰도 0에 가까운 점수로 마스크를 판정하지 않도록 NoWear와 같은 수준. 실측 검증 후 조정 |
+| NmsIouThreshold | 0.45 | 초기값 |
+| MinPersonHeightRatio / MaxPersonHeightRatio | 0.20 / 0.99 | 상체만 보이는 검사 허용(명세 0.40과 다름) |
+| MaxPersonWidthToHeightRatio | 1.5 | 상체 박스는 폭이 높이보다 넓을 수 있음 |
+| TargetAnalysisFrames / MinAnalysisFrames | 8 / 5 | 팀 튜닝으로 명세와 다름(명세 목표 12프레임) |
+| MaxAnalysisDurationSeconds | 7.0 | 팀 튜닝으로 명세와 다름(명세 최대 5초) |
+| MaxInferenceFps | 4 | PPE 896 + Person 640 두 모델 처리 시간에 맞춤(명세 6). 클라이언트 `MaxFrameSendFps`도 4 |
 | DecisionRatio | 0.70 | 문서 고정값 |
 
 ## 7. 테스트 실행

@@ -10,8 +10,11 @@ using SafetyVision.Data.Services;
 using SafetyVision.Server.Inference;
 using SafetyVision.Server.Networking;
 
-var builder = Host.CreateApplicationBuilder(args);
-builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory,
+});
 
 var options = new SafetyVisionOptions();
 builder.Configuration.Bind(options);

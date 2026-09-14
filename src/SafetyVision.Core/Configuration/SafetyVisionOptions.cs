@@ -1,3 +1,6 @@
+using System.Data.Common;
+using System.Net;
+
 namespace SafetyVision.Core.Configuration;
 
 public sealed class SafetyVisionOptions
@@ -22,20 +25,6 @@ public sealed class SafetyVisionOptions
     public int PersonModelInputSize { get; set; } = 640;
     public double PersonDetectionConfidence { get; set; } = 0.40;
 
-    // safetyvision 모델의 Mask/NO-Mask 클래스도 Person과 마찬가지로 실측 결과 신뢰도가 사실상 0에 가까워
-    // (동일 이미지에서 raw score 0.001 미만, 별도 검증 완료), 탐지 대신 얼굴 영역 분류기로 대체한다.
-    // 사람 박스마다 머리 위쪽 기준 (가로 MaskClassifierCropHalfWidthRatio*2, 세로 MaskClassifierCropBottomRatio)
-    // 만큼 잘라 분류기에 넣고, Hardhat/SafetyVest와 동일한 방식(합성 DetectedBox)으로 FrameAnalyzer에 넘긴다.
-    public string MaskModelPath { get; set; } = "models/mask_classifier.onnx";
-    public int MaskModelInputSize { get; set; } = 224;
-    public double MaskClassifierTopOffsetRatio { get; set; } = 0.065;
-
-    // 최근 대표 이미지 기준으로 눈 위주였던 영역을 코·입·턱까지 포함하도록 높이를 0.23으로 확장했다.
-    // 시작점은 Hardhat/NO-Hardhat 박스를 기준으로 별도 보정하므로 헬멧이나 어깨가 섞이지 않게 한다.
-    public double MaskClassifierCropBottomRatio { get; set; } = 0.23;
-    public double MaskClassifierCropHalfWidthRatio { get; set; } = 0.20;
-    public double MaskClassifierConfidence { get; set; } = 0.60;
-
     public double DetectionConfidence { get; set; } = 0.40;
 
     // "미착용"(NO-Hardhat/NO-Safety Vest) 클래스는 실측 결과 신뢰도가 전반적으로 낮다(0.01~0.23대).
@@ -49,7 +38,9 @@ public sealed class SafetyVisionOptions
     // 같은 이유로 Hardhat도 SafetyVest와 별도로 더 낮은 임계값을 쓴다(SafetyVest는 0.40에서도 안정적이라
     // DetectionConfidence를 그대로 쓴다).
     public double HardhatDetectionConfidence { get; set; } = 0.01;
-    public double MaskDetectionConfidence { get; set; } = 0.00001;
+    // 0에 가까운 점수로 마스크를 판정하지 않도록 NoWear와 같은 수준을 기본값으로 사용한다.
+    // 실측 검증 후 appsettings.json에서 조정할 수 있다.
+    public double MaskDetectionConfidence { get; set; } = 0.05;
 
     public double NmsIouThreshold { get; set; } = 0.45;
 
@@ -58,9 +49,11 @@ public sealed class SafetyVisionOptions
     public double RoiRight { get; set; } = 0.80;
     public double RoiBottom { get; set; } = 0.95;
 
-    public double MinPersonHeightRatio { get; set; } = 0.40;
+    // 상체만 보이는 검사도 허용하기 위해 인물 박스 높이 하한을 낮춘다.
+    public double MinPersonHeightRatio { get; set; } = 0.20;
     public double MaxPersonHeightRatio { get; set; } = 0.99;
-    public double MaxPersonWidthToHeightRatio { get; set; } = 0.75;
+    // 상체 박스는 폭이 높이보다 넓을 수 있어 비율을 넉넉히 허용한다.
+    public double MaxPersonWidthToHeightRatio { get; set; } = 1.5;
     public double PersonStableDurationSeconds { get; set; } = 0.8;
     public double PersonLeaveDurationSeconds { get; set; } = 1.0;
 
@@ -82,6 +75,7 @@ public sealed class SafetyVisionOptions
     public double VestBottomRatio { get; set; } = 0.75;
 
     public int JpegQuality { get; set; } = 90;
+    public string ListenAddress { get; set; } = "127.0.0.1";
     public int ListenPort { get; set; } = 8910;
 
     public ConnectionStringsOptions ConnectionStrings { get; set; } = new();
@@ -91,11 +85,6 @@ public sealed class SafetyVisionOptions
         if (ModelInputSize <= 0 || ModelInputSize % 32 != 0) yield return "ModelInputSize는 32의 배수인 양수여야 합니다.";
         if (PersonModelInputSize <= 0 || PersonModelInputSize % 32 != 0) yield return "PersonModelInputSize는 32의 배수인 양수여야 합니다.";
         if (PersonDetectionConfidence is < 0 or > 1) yield return "PersonDetectionConfidence는 0~1 사이여야 합니다.";
-        if (MaskModelInputSize <= 0) yield return "MaskModelInputSize는 양수여야 합니다.";
-        if (MaskClassifierTopOffsetRatio is < 0 or > 0.15) yield return "MaskClassifierTopOffsetRatio는 0~0.15 사이여야 합니다.";
-        if (MaskClassifierCropBottomRatio <= 0) yield return "MaskClassifierCropBottomRatio는 양수여야 합니다.";
-        if (MaskClassifierCropHalfWidthRatio <= 0) yield return "MaskClassifierCropHalfWidthRatio는 양수여야 합니다.";
-        if (MaskClassifierConfidence is <= 0.5 or > 1) yield return "MaskClassifierConfidence는 0.5 초과 1 이하여야 합니다.";
         if (DetectionConfidence is < 0 or > 1) yield return "DetectionConfidence는 0~1 사이여야 합니다.";
         if (NoWearDetectionConfidence is < 0 or > 1) yield return "NoWearDetectionConfidence는 0~1 사이여야 합니다.";
         if (HardhatDetectionConfidence is < 0 or > 1) yield return "HardhatDetectionConfidence는 0~1 사이여야 합니다.";
@@ -118,8 +107,35 @@ public sealed class SafetyVisionOptions
         if (MinEvidenceRatio is <= 0 or > 1) yield return "MinEvidenceRatio는 0 초과 1 이하여야 합니다.";
         if (DecisionRatio is <= 0.5 or > 1) yield return "DecisionRatio는 0.5 초과 1 이하여야 합니다.";
         if (JpegQuality is < 1 or > 100) yield return "JpegQuality는 1~100 사이여야 합니다.";
+        if (!IPAddress.TryParse(ListenAddress, out _)) yield return "ListenAddress는 유효한 IP 주소여야 합니다.";
         if (ListenPort is <= 0 or > 65535) yield return "ListenPort는 1~65535 사이여야 합니다.";
-        if (string.IsNullOrWhiteSpace(ConnectionStrings.MySql)) yield return "ConnectionStrings:MySql이 비어 있습니다.";
+        var connectionStringError = ValidateMySqlConnectionString(ConnectionStrings?.MySql);
+        if (connectionStringError is not null) yield return connectionStringError;
+    }
+
+    private static string? ValidateMySqlConnectionString(string? connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString)) return "ConnectionStrings:MySql이 비어 있습니다.";
+
+        var builder = new DbConnectionStringBuilder();
+        try
+        {
+            builder.ConnectionString = connectionString;
+        }
+        catch (ArgumentException ex)
+        {
+            return $"ConnectionStrings:MySql 형식이 잘못되었습니다: {ex.Message}";
+        }
+
+        bool hasPassword = builder.Keys
+            .Cast<string>()
+            .Where(key => string.Equals(key, "Password", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "Pwd", StringComparison.OrdinalIgnoreCase))
+            .Any(key => !string.IsNullOrWhiteSpace(builder[key]?.ToString()));
+
+        return hasPassword
+            ? null
+            : "환경변수 ConnectionStrings__MySql로 비밀번호를 포함한 연결 문자열을 지정해야 합니다.";
     }
 }
 
