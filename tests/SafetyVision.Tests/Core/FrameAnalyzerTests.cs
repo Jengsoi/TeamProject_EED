@@ -9,7 +9,14 @@ public class FrameAnalyzerTests
 {
     private const int Width = 1280;
     private const int Height = 720;
-    private static readonly SafetyVisionOptions Options = new();
+
+    // 크기·비율 경계 테스트가 옵션 기본값 변경에 흔들리지 않도록 값을 명시한다.
+    private static SafetyVisionOptions SizeOptions(double minHeightRatio = 0.40, double maxWidthToHeightRatio = 0.75) => new()
+    {
+        MinPersonHeightRatio = minHeightRatio,
+        MaxPersonHeightRatio = 0.99,
+        MaxPersonWidthToHeightRatio = maxWidthToHeightRatio,
+    };
 
     private static DetectedBox Person(float x, float y, float w, float h) =>
         new(DetectedClass.Person, x, y, w, h, 0.9f);
@@ -18,7 +25,7 @@ public class FrameAnalyzerTests
     public void NoPersonInRoi_IsNone()
     {
         var boxes = new[] { Person(0, 0, 50, 50) }; // 완전히 ROI 밖
-        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, Options);
+        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, new SafetyVisionOptions());
         Assert.Equal(PersonRoiCondition.None, eval.Condition);
     }
 
@@ -30,7 +37,7 @@ public class FrameAnalyzerTests
             Person(500, 200, 200, 400),
             Person(700, 200, 200, 400),
         };
-        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, Options);
+        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, new SafetyVisionOptions());
         Assert.Equal(PersonRoiCondition.Multiple, eval.Condition);
     }
 
@@ -38,7 +45,8 @@ public class FrameAnalyzerTests
     public void PersonTooSmall_IsTooSmall()
     {
         var boxes = new[] { Person(560, 400, 100, 100) }; // height 100 < 720*0.4=288
-        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, Options);
+        var options = SizeOptions();
+        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, options);
         Assert.Equal(PersonRoiCondition.TooSmall, eval.Condition);
     }
 
@@ -46,7 +54,8 @@ public class FrameAnalyzerTests
     public void CroppedClosePerson_IsTooClose()
     {
         var boxes = new[] { Person(250, 0, 780, 720) };
-        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, Options);
+        var options = SizeOptions();
+        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, options);
         Assert.Equal(PersonRoiCondition.TooClose, eval.Condition);
     }
 
@@ -58,11 +67,12 @@ public class FrameAnalyzerTests
             Person(500, 200, 200, 400),
             new(DetectedClass.Hardhat, 590, 240, 20, 20, 0.8f), // center (600,250) inside head region
         };
-        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, Options);
+        var options = SizeOptions();
+        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, options);
         Assert.Equal(PersonRoiCondition.Qualified, eval.Condition);
         Assert.Equal(FrameVote.Positive, eval.Votes[EquipmentCode.Hardhat]);
-        Assert.Equal(FrameVote.Negative, eval.Votes[EquipmentCode.Vest]);
-        Assert.Equal(FrameVote.Negative, eval.Votes[EquipmentCode.Mask]);
+        Assert.Equal(FrameVote.NoInfo, eval.Votes[EquipmentCode.Vest]);
+        Assert.Equal(FrameVote.NoInfo, eval.Votes[EquipmentCode.Mask]);
     }
 
     [Fact]
@@ -74,7 +84,8 @@ public class FrameAnalyzerTests
             new(DetectedClass.Hardhat, 590, 240, 20, 20, 0.8f),
             new(DetectedClass.NoHardhat, 600, 250, 20, 20, 0.7f),
         };
-        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, Options);
+        var options = SizeOptions();
+        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, options);
         Assert.Equal(FrameVote.Conflict, eval.Votes[EquipmentCode.Hardhat]);
     }
 
@@ -87,9 +98,35 @@ public class FrameAnalyzerTests
         var hardhat = new DetectedBox(DetectedClass.Hardhat, 590, 240, 20, 20, 0.8f); // center (600,250)
 
         var boxes = new[] { target, otherOutsideRoi, hardhat };
-        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, Options);
+        var options = SizeOptions();
+        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, options);
 
         Assert.Equal(PersonRoiCondition.Qualified, eval.Condition);
         Assert.Equal(FrameVote.NoInfo, eval.Votes[EquipmentCode.Hardhat]);
+    }
+
+    [Fact]
+    public void QualifiedPersonWithoutConnectedPpe_VotesNoInfoForAllEquipment()
+    {
+        var boxes = new[] { Person(500, 200, 200, 400) };
+        var options = SizeOptions(minHeightRatio: 0.20, maxWidthToHeightRatio: 1.5);
+
+        var eval = FrameAnalyzer.Evaluate(boxes, Width, Height, options);
+
+        Assert.Equal(PersonRoiCondition.Qualified, eval.Condition);
+        Assert.Equal(FrameVote.NoInfo, eval.Votes[EquipmentCode.Hardhat]);
+        Assert.Equal(FrameVote.NoInfo, eval.Votes[EquipmentCode.Vest]);
+        Assert.Equal(FrameVote.NoInfo, eval.Votes[EquipmentCode.Mask]);
+    }
+
+    [Fact]
+    public void UpperBodyPerson_IsQualifiedAtWideRatioAndTooCloseAtNarrowRatio()
+    {
+        var boxes = new[] { Person(390, 160, 500, 400) };
+        var qualified = FrameAnalyzer.Evaluate(boxes, Width, Height, SizeOptions(minHeightRatio: 0.20, maxWidthToHeightRatio: 1.5));
+        var tooClose = FrameAnalyzer.Evaluate(boxes, Width, Height, SizeOptions(minHeightRatio: 0.20, maxWidthToHeightRatio: 0.75));
+
+        Assert.Equal(PersonRoiCondition.Qualified, qualified.Condition);
+        Assert.Equal(PersonRoiCondition.TooClose, tooClose.Condition);
     }
 }

@@ -15,7 +15,8 @@ public sealed class StatusToBrushConverter : IValueConverter
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) => (value as string) switch
     {
         "WORN" or "NORMAL" => Worn,
-        "NOT_WORN" or "CHECK_REQUIRED" or "UNCONFIRMED" => NotWorn,
+        "NOT_WORN" or "CHECK_REQUIRED" => NotWorn,
+        "UNCONFIRMED" => Unknown,
         _ => Unknown
     };
 
@@ -31,7 +32,7 @@ public sealed class StatusToTextConverter : IValueConverter
         "UNKNOWN" => "미확인",
         "NORMAL" => "정상",
         "CHECK_REQUIRED" => "점검 필요",
-        "UNCONFIRMED" => "점검 필요",
+        "UNCONFIRMED" => "미확인",
         _ => value?.ToString() ?? ""
     };
 

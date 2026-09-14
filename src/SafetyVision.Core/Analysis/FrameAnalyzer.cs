@@ -52,18 +52,12 @@ public static class FrameAnalyzer
         {
             bool positive = HasUniqueConnectionToTarget(pair.Positive, target, allPersons, allBoxes, options);
             bool negative = HasUniqueConnectionToTarget(pair.Negative, target, allPersons, allBoxes, options);
-            bool ambiguous = HasAmbiguousConnectionToTarget(pair.Positive, target, allPersons, allBoxes, options)
-                || HasAmbiguousConnectionToTarget(pair.Negative, target, allPersons, allBoxes, options);
             result[pair.Code] = (positive, negative) switch
             {
                 (true, true) => FrameVote.Conflict,
                 (true, false) => FrameVote.Positive,
                 (false, true) => FrameVote.Negative,
-                _ when ambiguous => FrameVote.NoInfo,
-                // 검사 가능한 크기의 전신 한 명이 확보된 상태에서는 착용/미착용 검출이 모두 없는
-                // 장비를 미착용으로 본다. 현장 모델은 착용 클래스는 안정적이지만 미착용 클래스의
-                // 신뢰도가 낮아, NoInfo를 유지하면 실제 미착용 전신 검사가 대부분 UNKNOWN이 된다.
-                _ => FrameVote.Negative
+                (false, false) => FrameVote.NoInfo
             };
         }
         return result;
@@ -92,25 +86,6 @@ public static class FrameAnalyzer
 
             // 둘 이상의 Person에 연결되면 모호한 PPE로 제외(대상에게도 사용하지 않음).
             if (connectedCount == 1 && connectedToTarget) return true;
-        }
-        return false;
-    }
-
-    private static bool HasAmbiguousConnectionToTarget(
-        DetectedClass ppeClass,
-        DetectedBox target,
-        IReadOnlyList<DetectedBox> allPersons,
-        IReadOnlyList<DetectedBox> allBoxes,
-        SafetyVisionOptions options)
-    {
-        foreach (var ppeBox in allBoxes.Where(b => b.Class == ppeClass))
-        {
-            bool connectedToTarget = PpeAssociationRules.IsCandidate(ppeClass, target, ppeBox, options);
-            if (!connectedToTarget) continue;
-
-            int connectedCount = allPersons.Count(person =>
-                PpeAssociationRules.IsCandidate(ppeClass, person, ppeBox, options));
-            if (connectedCount > 1) return true;
         }
         return false;
     }
