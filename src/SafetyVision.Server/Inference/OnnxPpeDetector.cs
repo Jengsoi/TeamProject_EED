@@ -289,6 +289,27 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
             .FirstOrDefault();
     }
 
+    private void ResolveHeadwearConflicts(
+        IReadOnlyList<DetectedBox> persons,
+        List<DetectedBox> ppeBoxes,
+        List<DetectedBox> resultBoxes)
+    {
+        foreach (var person in persons)
+        {
+            bool hasHardhat = ppeBoxes.Any(b => b.Class == DetectedClass.Hardhat
+                && PpeAssociationRules.IsCandidate(DetectedClass.Hardhat, person, b, _options));
+            if (!hasHardhat)
+                continue;
+
+            // 같은 머리에 Hardhat과 NO-Hardhat이 함께 검출되면 결과가 Conflict가 된다.
+            // 실제 안전모 박스가 확인된 경우 해당 사람에게 연결된 NO-Hardhat만 제거한다.
+            ppeBoxes.RemoveAll(b => b.Class == DetectedClass.NoHardhat
+                && PpeAssociationRules.IsCandidate(DetectedClass.NoHardhat, person, b, _options));
+            resultBoxes.RemoveAll(b => b.Class == DetectedClass.NoHardhat
+                && PpeAssociationRules.IsCandidate(DetectedClass.NoHardhat, person, b, _options));
+        }
+    }
+
     private static int AdjustFaceTopForHeadwear(DetectedBox headwear, int detectedFaceTop)
     {
         double anchorRatio = headwear.Class switch
@@ -336,6 +357,7 @@ public sealed class OnnxPpeDetector : IPpeDetector, IDisposable
             personBoxes = ppeBoxes.Where(b => b.Class == DetectedClass.Person).ToList();
         }
 
+        ResolveHeadwearConflicts(personBoxes, ppeBoxes, boxes);
         boxes.AddRange(personBoxes);
 
         // 사람 박스마다 얼굴 영역을 잘라 Mask 분류기를 돌리고, 결과를 합성 DetectedBox로 추가한다.

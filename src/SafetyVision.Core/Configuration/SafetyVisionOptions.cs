@@ -28,13 +28,11 @@ public sealed class SafetyVisionOptions
     // 만큼 잘라 분류기에 넣고, Hardhat/SafetyVest와 동일한 방식(합성 DetectedBox)으로 FrameAnalyzer에 넘긴다.
     public string MaskModelPath { get; set; } = "models/mask_classifier.onnx";
     public int MaskModelInputSize { get; set; } = 224;
-    public double MaskClassifierTopOffsetRatio { get; set; } = 0.035;
+    public double MaskClassifierTopOffsetRatio { get; set; } = 0.065;
 
-    // 안전모를 쓰면 사람 박스의 맨 위 지점이 헬멧 꼭대기까지 올라가서, 이 비율을 person.Y 기준으로만
-    // 늘리면(예: 0.30) 안전모 없을 때는 목/어깨까지 크롭에 포함되어 분류기가 오히려 마스크로 오판했다
-    // (실측 확인). 그래서 비율은 원래 값(0.16)으로 유지하고, 안전모가 검출된 경우엔 크롭의 시작점 자체를
-    // 안전모 박스 아래쪽으로 보정한다(OnnxPpeDetector.FindHeadwear 참고).
-    public double MaskClassifierCropBottomRatio { get; set; } = 0.16;
+    // 최근 대표 이미지 기준으로 눈 위주였던 영역을 코·입·턱까지 포함하도록 높이를 0.23으로 확장했다.
+    // 시작점은 Hardhat/NO-Hardhat 박스를 기준으로 별도 보정하므로 헬멧이나 어깨가 섞이지 않게 한다.
+    public double MaskClassifierCropBottomRatio { get; set; } = 0.23;
     public double MaskClassifierCropHalfWidthRatio { get; set; } = 0.20;
     public double MaskClassifierConfidence { get; set; } = 0.60;
 
