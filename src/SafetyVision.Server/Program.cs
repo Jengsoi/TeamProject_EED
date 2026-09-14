@@ -11,7 +11,6 @@ using SafetyVision.Server.Inference;
 using SafetyVision.Server.Networking;
 
 var builder = Host.CreateApplicationBuilder(args);
-builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false);
 
 var options = new SafetyVisionOptions();
 builder.Configuration.Bind(options);

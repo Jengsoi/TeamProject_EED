@@ -10,6 +10,7 @@ namespace SafetyVision.Client.Networking;
 // 서버가 능동적으로 보내는 상태/결과/저장응답/오류 알림은 이벤트로 구독자에 전달한다.
 public sealed class ServerConnection(string host, int port) : IDisposable
 {
+    private readonly SemaphoreSlim _connectLock = new(1, 1);
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<Envelope>> _pending = new();
     private readonly ConcurrentDictionary<Guid, byte[]> _pendingImages = new();
@@ -17,6 +18,8 @@ public sealed class ServerConnection(string host, int port) : IDisposable
     private TcpClient? _client;
     private NetworkStream? _stream;
     private CancellationTokenSource? _readLoopCts;
+    private int _connectionGeneration;
+    private bool _disposed;
 
     public bool IsConnected { get; private set; }
 
@@ -28,23 +31,49 @@ public sealed class ServerConnection(string host, int port) : IDisposable
 
     public async Task<bool> ConnectAsync(CancellationToken ct = default)
     {
+        await _connectLock.WaitAsync(ct).ConfigureAwait(false);
+        TcpClient? newClient = null;
         try
         {
-            _client?.Close();
-            _client = new TcpClient();
-            await _client.ConnectAsync(host, port, ct).ConfigureAwait(false);
-            _stream = _client.GetStream();
-            IsConnected = true;
+            if (_disposed) return false;
 
-            _readLoopCts?.Cancel();
-            _readLoopCts = new CancellationTokenSource();
-            _ = Task.Run(() => ReadLoopAsync(_readLoopCts.Token), CancellationToken.None);
+            var previousCts = Interlocked.Exchange(ref _readLoopCts, null);
+            var previousClient = Interlocked.Exchange(ref _client, null);
+            _stream = null;
+            IsConnected = false;
+            Interlocked.Increment(ref _connectionGeneration);
+            previousCts?.Cancel();
+            previousCts?.Dispose();
+            try { previousClient?.Close(); } catch (Exception) { /* best effort */ }
+            FailPendingRequests();
+
+            newClient = new TcpClient();
+            await newClient.ConnectAsync(host, port, ct).ConfigureAwait(false);
+            var stream = newClient.GetStream();
+            var readLoopCts = new CancellationTokenSource();
+            int generation = Volatile.Read(ref _connectionGeneration);
+
+            _client = newClient;
+            _stream = stream;
+            _readLoopCts = readLoopCts;
+            IsConnected = true;
+            newClient = null;
+            _ = Task.Run(() => ReadLoopAsync(stream, generation, readLoopCts.Token), CancellationToken.None);
             return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return false;
         }
         catch (Exception)
         {
             IsConnected = false;
             return false;
+        }
+        finally
+        {
+            try { newClient?.Close(); } catch (Exception) { /* best effort */ }
+            _connectLock.Release();
         }
     }
 
@@ -60,7 +89,8 @@ public sealed class ServerConnection(string host, int port) : IDisposable
 
     public async Task<Envelope> RequestAsync<TPayload>(string type, TPayload payload, TimeSpan? timeout = null, CancellationToken ct = default)
     {
-        if (!IsConnected || _stream is null) throw new IOException("서버에 연결되어 있지 않습니다.");
+        var stream = _stream;
+        if (!IsConnected || stream is null) throw new IOException("서버에 연결되어 있지 않습니다.");
 
         var correlationId = Guid.NewGuid();
         var tcs = new TaskCompletionSource<Envelope>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -71,7 +101,7 @@ public sealed class ServerConnection(string host, int port) : IDisposable
             await _writeLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                await ProtocolMessage.SendAsync(_stream, type, correlationId, payload, ct).ConfigureAwait(false);
+                await ProtocolMessage.SendAsync(stream, type, correlationId, payload, ct).ConfigureAwait(false);
             }
             finally
             {
@@ -101,12 +131,13 @@ public sealed class ServerConnection(string host, int port) : IDisposable
 
     public async Task SendAsync<TPayload>(string type, TPayload payload, CancellationToken ct = default)
     {
-        if (!IsConnected || _stream is null) return;
+        var stream = _stream;
+        if (!IsConnected || stream is null) return;
         var correlationId = Guid.NewGuid();
         await _writeLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await ProtocolMessage.SendAsync(_stream, type, correlationId, payload, ct).ConfigureAwait(false);
+            await ProtocolMessage.SendAsync(stream, type, correlationId, payload, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -116,13 +147,14 @@ public sealed class ServerConnection(string host, int port) : IDisposable
 
     public async Task SendFrameAsync(FrameMetaPayload meta, byte[] jpegBytes, CancellationToken ct = default)
     {
-        if (!IsConnected || _stream is null) return;
+        var stream = _stream;
+        if (!IsConnected || stream is null) return;
         var correlationId = Guid.NewGuid();
         await _writeLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await ProtocolMessage.SendAsync(_stream, MessageTypes.FrameMeta, correlationId, meta, ct).ConfigureAwait(false);
-            await ProtocolMessage.SendImageAsync(_stream, jpegBytes, ct).ConfigureAwait(false);
+            await ProtocolMessage.SendAsync(stream, MessageTypes.FrameMeta, correlationId, meta, ct).ConfigureAwait(false);
+            await ProtocolMessage.SendImageAsync(stream, jpegBytes, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -130,13 +162,13 @@ public sealed class ServerConnection(string host, int port) : IDisposable
         }
     }
 
-    private async Task ReadLoopAsync(CancellationToken ct)
+    private async Task ReadLoopAsync(NetworkStream stream, int generation, CancellationToken ct)
     {
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                var envelope = await ProtocolMessage.ReceiveEnvelopeAsync(_stream!, ct).ConfigureAwait(false);
+                var envelope = await ProtocolMessage.ReceiveEnvelopeAsync(stream, ct).ConfigureAwait(false);
 
                 // 07_통신프로토콜.md §4: imageAvailable=true인 InspectionResult/InspectionDetailResponse는
                 // 바로 뒤에 0x02 이미지 프레임이 온다. 다음 envelope를 읽기 전에 반드시 먼저 소비해야 한다.
@@ -144,7 +176,7 @@ public sealed class ServerConnection(string host, int port) : IDisposable
                 {
                     var payload = envelope.DeserializePayload<InspectionResultPayload>();
                     byte[]? image = payload.ImageAvailable
-                        ? await ProtocolMessage.ReceiveImageAsync(_stream!, ct).ConfigureAwait(false)
+                        ? await ProtocolMessage.ReceiveImageAsync(stream, ct).ConfigureAwait(false)
                         : null;
                     if (_pending.TryRemove(envelope.CorrelationId, out var tcsResult)) tcsResult.TrySetResult(envelope);
                     ResultReceived?.Invoke(payload, image);
@@ -156,7 +188,7 @@ public sealed class ServerConnection(string host, int port) : IDisposable
                     var payload = envelope.DeserializePayload<InspectionDetailResponsePayload>();
                     if (payload.ImageAvailable)
                     {
-                        var image = await ProtocolMessage.ReceiveImageAsync(_stream!, ct).ConfigureAwait(false);
+                        var image = await ProtocolMessage.ReceiveImageAsync(stream, ct).ConfigureAwait(false);
                         _pendingImages[envelope.CorrelationId] = image;
                     }
                     if (_pending.TryRemove(envelope.CorrelationId, out var tcsDetail)) tcsDetail.TrySetResult(envelope);
@@ -189,17 +221,46 @@ public sealed class ServerConnection(string host, int port) : IDisposable
         }
         finally
         {
-            IsConnected = false;
-            foreach (var kvp in _pending) kvp.Value.TrySetException(new IOException("서버 연결이 끊어졌습니다."));
-            _pending.Clear();
-            Disconnected?.Invoke();
+            HandleConnectionLost(generation);
         }
+    }
+
+    private void HandleConnectionLost(int generation)
+    {
+        if (generation != Volatile.Read(ref _connectionGeneration)) return;
+
+        IsConnected = false;
+        _stream = null;
+        var lostClient = Interlocked.Exchange(ref _client, null);
+        try { lostClient?.Close(); } catch (Exception) { /* best effort */ }
+        var lostCts = Interlocked.Exchange(ref _readLoopCts, null);
+        lostCts?.Dispose();
+        FailPendingRequests();
+        Disconnected?.Invoke();
+    }
+
+    private void FailPendingRequests()
+    {
+        foreach (var kvp in _pending)
+            kvp.Value.TrySetException(new IOException("서버 연결이 끊어졌습니다."));
+        _pending.Clear();
+        _pendingImages.Clear();
     }
 
     public void Dispose()
     {
-        _readLoopCts?.Cancel();
-        try { _client?.Close(); } catch (Exception) { /* 정리 중 예외 무시 */ }
+        if (_disposed) return;
+        _disposed = true;
+        Interlocked.Increment(ref _connectionGeneration);
+        var readLoopCts = Interlocked.Exchange(ref _readLoopCts, null);
+        readLoopCts?.Cancel();
+        readLoopCts?.Dispose();
+        var client = Interlocked.Exchange(ref _client, null);
+        try { client?.Close(); } catch (Exception) { /* 정리 중 예외 무시 */ }
+        _stream = null;
+        IsConnected = false;
+        FailPendingRequests();
+        _connectLock.Dispose();
         _writeLock.Dispose();
     }
 }

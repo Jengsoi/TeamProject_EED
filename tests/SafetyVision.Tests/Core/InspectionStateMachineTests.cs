@@ -165,6 +165,25 @@ public class InspectionStateMachineTests
         Assert.Equal(InspectionState.Waiting, sm.State);
     }
 
+    [Fact]
+    public void DiscardAndReturnToWaiting_ClearsResultAndInvalidatesPreviousGeneration()
+    {
+        var sm = new InspectionStateMachine(new SafetyVisionOptions());
+        EnterInspecting(sm, startNow: 0.0);
+        for (int i = 1; i <= 12; i++) sm.ProcessFrame(Qualified(), i * 0.2);
+        sm.MarkSaveSucceeded();
+        int previousGeneration = sm.Generation;
+
+        sm.DiscardAndReturnToWaiting();
+
+        Assert.Equal(InspectionState.Waiting, sm.State);
+        Assert.Equal(SaveState.None, sm.SaveState);
+        Assert.Null(sm.Outcome);
+        Assert.Equal(previousGeneration + 1, sm.Generation);
+        sm.ProcessFrame(Qualified(), 10.0);
+        Assert.Equal(InspectionState.PersonDetected, sm.State);
+    }
+
     // startNow는 Inspecting 진입 시각(=세 번째 프레임 시각)이 된다. 앞의 두 프레임은 0.0/0.1초 간격을 유지한 채
     // startNow 기준으로 역산한 시각을 사용해 시간 단조 증가를 보장한다.
     private static void EnterInspecting(InspectionStateMachine sm, double startNow = 0.9)

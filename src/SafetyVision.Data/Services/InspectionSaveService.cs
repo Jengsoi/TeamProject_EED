@@ -34,14 +34,18 @@ public sealed class InspectionSaveService(SafetyVisionDbContext db, ILogger<Insp
             var existing = await db.Inspections.FirstOrDefaultAsync(i => i.InspectionKey == request.InspectionKey, ct);
             if (existing is not null) return new SaveInspectionResult(SaveOutcome.Success, existing.Id);
 
-            string root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string dateDir = request.InspectedAtUtc.ToLocalTime().ToString("yyyyMMdd");
-            string snapshotDir = Path.Combine(root, "SafetyVision", "snapshots", dateDir);
-            Directory.CreateDirectory(snapshotDir);
-            string tempFile = Path.Combine(snapshotDir, $"tmp_{Guid.NewGuid():N}.jpg");
+            string? tempFile = null;
+            string? finalFile = null;
+            bool finalFileMoved = false;
 
             try
             {
+                string root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string dateDir = request.InspectedAtUtc.ToLocalTime().ToString("yyyyMMdd");
+                string snapshotDir = Path.Combine(root, "SafetyVision", "snapshots", dateDir);
+                Directory.CreateDirectory(snapshotDir);
+                tempFile = Path.Combine(snapshotDir, $"tmp_{Guid.NewGuid():N}.jpg");
+
                 if (request.RepresentativeJpeg is { Length: > 0 })
                     await File.WriteAllBytesAsync(tempFile, request.RepresentativeJpeg, ct);
 
@@ -79,11 +83,15 @@ public sealed class InspectionSaveService(SafetyVisionDbContext db, ILogger<Insp
                 string finalFileName = $"inspection_{inspection.Id}.jpg";
                 string finalRelativePath = Path.Combine("snapshots", dateDir, finalFileName);
                 bool hasImage = File.Exists(tempFile);
+                finalFile = Path.Combine(snapshotDir, finalFileName);
                 inspection.ImagePath = hasImage ? finalRelativePath : "";
                 await db.SaveChangesAsync(ct);
 
                 if (hasImage)
-                    File.Move(tempFile, Path.Combine(snapshotDir, finalFileName), overwrite: true);
+                {
+                    File.Move(tempFile, finalFile, overwrite: false);
+                    finalFileMoved = true;
+                }
 
                 await tx.CommitAsync(ct);
                 return new SaveInspectionResult(SaveOutcome.Success, inspection.Id);
@@ -91,7 +99,11 @@ public sealed class InspectionSaveService(SafetyVisionDbContext db, ILogger<Insp
             catch (Exception ex)
             {
                 logger.LogError(ex, "검사 결과 저장 실패 (InspectionKey={Key})", request.InspectionKey);
-                if (File.Exists(tempFile))
+                if (finalFileMoved && finalFile is not null && File.Exists(finalFile))
+                {
+                    try { File.Delete(finalFile); } catch (IOException) { /* best effort */ }
+                }
+                if (tempFile is not null && File.Exists(tempFile))
                 {
                     try { File.Delete(tempFile); } catch (IOException) { /* best effort */ }
                 }

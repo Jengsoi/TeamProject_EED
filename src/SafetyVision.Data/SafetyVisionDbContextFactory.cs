@@ -10,7 +10,7 @@ public sealed class SafetyVisionDbContextFactory : IDesignTimeDbContextFactory<S
     {
         var optionsBuilder = new DbContextOptionsBuilder<SafetyVisionDbContext>();
         string designTimeConnectionString = Environment.GetEnvironmentVariable("SAFETYVISION_MYSQL_CONNSTR")
-            ?? "Server=localhost;Port=3306;Database=safetyvision;User=safetyvision_app;Password=CHANGE_ME;";
+            ?? "Server=localhost;Port=3306;Database=safetyvision;User=safetyvision_app;Password=CHANGE_ME;SslMode=None;AllowPublicKeyRetrieval=True;";
         optionsBuilder.UseMySql(designTimeConnectionString, new MySqlServerVersion(new Version(8, 0, 36)));
         return new SafetyVisionDbContext(optionsBuilder.Options);
     }

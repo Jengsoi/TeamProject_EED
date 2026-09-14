@@ -17,26 +17,38 @@ public sealed class StatisticsQueryService(SafetyVisionDbContext db)
     public async Task<IReadOnlyList<CameraStatusCount>> GetCameraBreakdownAsync(CancellationToken ct)
     {
         var rows = await db.Inspections
-            .Select(i => new { i.CameraName, i.Result })
+            .GroupBy(i => i.CameraName == null || i.CameraName == "" ? "CAM 01" : i.CameraName)
+            .Select(g => new
+            {
+                CameraName = g.Key,
+                Total = g.Count(),
+                Normal = g.Count(i => i.Result == "NORMAL"),
+                CheckRequired = g.Count(i => i.Result != "NORMAL"),
+            })
+            .OrderBy(c => c.CameraName)
             .ToListAsync(ct);
 
         return rows
-            .GroupBy(r => string.IsNullOrEmpty(r.CameraName) ? "CAM 01" : r.CameraName)
-            .Select(g => new CameraStatusCount(g.Key, g.Count(), g.Count(x => x.Result == "NORMAL"), g.Count(x => x.Result != "NORMAL")))
+            .Select(c => new CameraStatusCount(c.CameraName, c.Total, c.Normal, c.CheckRequired))
             .OrderBy(c => c.CameraName)
             .ToList();
     }
 
     public async Task<IReadOnlyList<EquipmentStatusCount>> GetEquipmentBreakdownAsync(CancellationToken ct)
     {
-        var result = new List<EquipmentStatusCount>();
-        foreach (var code in new[] { EquipmentCode.Hardhat, EquipmentCode.Vest, EquipmentCode.Mask })
+        var codes = EquipmentClassMap.All.Select(p => EquipmentClassMap.ToDbCode(p.Code)).ToArray();
+        var grouped = await db.InspectionItems
+            .Where(i => codes.Contains(i.EquipmentCode))
+            .GroupBy(i => new { i.EquipmentCode, i.Status })
+            .Select(g => new { g.Key.EquipmentCode, g.Key.Status, Count = g.Count() })
+            .ToListAsync(ct);
+
+        var result = new List<EquipmentStatusCount>(EquipmentClassMap.All.Count);
+        foreach (var pair in EquipmentClassMap.All)
         {
-            string dbCode = EquipmentClassMap.ToDbCode(code);
-            int worn = await db.InspectionItems.CountAsync(x => x.EquipmentCode == dbCode && x.Status == "WORN", ct);
-            int notWorn = await db.InspectionItems.CountAsync(x => x.EquipmentCode == dbCode && x.Status == "NOT_WORN", ct);
-            int unknown = await db.InspectionItems.CountAsync(x => x.EquipmentCode == dbCode && x.Status == "UNKNOWN", ct);
-            result.Add(new EquipmentStatusCount(code, worn, notWorn, unknown));
+            string dbCode = EquipmentClassMap.ToDbCode(pair.Code);
+            int Count(string status) => grouped.FirstOrDefault(x => x.EquipmentCode == dbCode && x.Status == status)?.Count ?? 0;
+            result.Add(new EquipmentStatusCount(pair.Code, Count("WORN"), Count("NOT_WORN"), Count("UNKNOWN")));
         }
         return result;
     }

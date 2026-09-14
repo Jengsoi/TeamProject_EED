@@ -62,7 +62,9 @@ public sealed class InspectionStateMachine
             case InspectionState.Result:
                 if (reason is CancelReason.DeviceError or CancelReason.InferenceError or CancelReason.DatabaseError)
                     IsErrorLocked = true;
-                // 화면 이동/로그아웃/연결 종료는 확정 결과·저장 처리를 유지한다(세션 정리는 Server 책임).
+                else if (reason is CancelReason.ScreenLeft or CancelReason.LoggedOut or CancelReason.ConnectionClosed)
+                    DiscardAndReturnToWaiting();
+                // 화면 이동/로그아웃/연결 종료는 확정 결과를 더 이상 재사용하지 않도록 세션을 폐기한다.
                 break;
         }
     }
@@ -88,6 +90,7 @@ public sealed class InspectionStateMachine
     public void DiscardAndReturnToWaiting()
     {
         State = InspectionState.Waiting;
+        Generation++;
         ResetForNextWaiting();
     }
 
@@ -120,6 +123,7 @@ public sealed class InspectionStateMachine
         if (eval.Condition != PersonRoiCondition.Qualified)
         {
             State = InspectionState.Waiting;
+            Generation++;
             _stableSince = null;
             _stableObservationCount = 0;
             GuidanceMessage = eval.Condition switch
@@ -201,8 +205,7 @@ public sealed class InspectionStateMachine
             if (SaveState == SaveState.Saved && !IsErrorLocked
                 && now - _absentSince.Value >= _options.PersonLeaveDurationSeconds)
             {
-                State = InspectionState.Waiting;
-                ResetForNextWaiting();
+                DiscardAndReturnToWaiting();
             }
         }
         else
@@ -263,6 +266,9 @@ public sealed class InspectionStateMachine
         _stableSince = null;
         _stableObservationCount = 0;
         _absentSince = null;
+        _inspectionStartTime = 0;
+        foreach (var acc in _accumulators.Values) acc.Reset();
+        _frameVotes.Clear();
         Outcome = null;
         SaveState = SaveState.None;
         IsErrorLocked = false;

@@ -12,11 +12,24 @@ namespace SafetyVision.Client.ViewModels;
 // SCR-03 검사 이력.
 public sealed partial class HistoryViewModel(ServerConnection connection) : ObservableObject
 {
+    private static readonly IReadOnlyList<HistoryResultFilterOption> FilterOptions =
+    [
+        new("전체 결과", null),
+        new("정상", "NORMAL"),
+        new("점검 필요", "CHECK_REQUIRED"),
+        new("미확인", "UNCONFIRMED"),
+    ];
+
+    public IReadOnlyList<HistoryResultFilterOption> ResultFilterOptions => FilterOptions;
+
     [ObservableProperty] private int page = 1;
     [ObservableProperty] private int totalPages = 1;
     [ObservableProperty] private int totalCount;
     [ObservableProperty] private bool isLoading;
     [ObservableProperty] private string? errorMessage;
+    [ObservableProperty] private DateTime? fromDate;
+    [ObservableProperty] private DateTime? toDate;
+    [ObservableProperty] private HistoryResultFilterOption selectedResultFilter = FilterOptions[0];
 
     [ObservableProperty] private bool isDetailOpen;
     [ObservableProperty] private InspectionDetailResponsePayload? detail;
@@ -33,7 +46,14 @@ public sealed partial class HistoryViewModel(ServerConnection connection) : Obse
         ErrorMessage = null;
         try
         {
-            var envelope = await connection.RequestAsync(MessageTypes.HistoryPageRequest, new HistoryPageRequestPayload(targetPage, null, null, null));
+            if (FromDate is not null && ToDate is not null && FromDate.Value.Date > ToDate.Value.Date)
+            {
+                ErrorMessage = "시작일은 종료일보다 늦을 수 없습니다.";
+                return;
+            }
+
+            var envelope = await connection.RequestAsync(MessageTypes.HistoryPageRequest,
+                new HistoryPageRequestPayload(targetPage, ToUtcStart(FromDate), ToUtcEnd(ToDate), SelectedResultFilter?.Value));
             var resp = envelope.DeserializePayload<HistoryPageResponsePayload>();
             Page = resp.Page;
             TotalPages = Math.Max(1, resp.TotalPages);
@@ -58,6 +78,18 @@ public sealed partial class HistoryViewModel(ServerConnection connection) : Obse
 
     [RelayCommand]
     private Task NextPageAsync() => Page < TotalPages ? LoadAsync(Page + 1) : Task.CompletedTask;
+
+    [RelayCommand]
+    private Task ApplyFiltersAsync() => LoadAsync(1);
+
+    [RelayCommand]
+    private Task ResetFiltersAsync()
+    {
+        FromDate = null;
+        ToDate = null;
+        SelectedResultFilter = FilterOptions[0];
+        return LoadAsync(1);
+    }
 
     [RelayCommand]
     private async Task OpenDetailAsync(long id)
@@ -92,4 +124,20 @@ public sealed partial class HistoryViewModel(ServerConnection connection) : Obse
 
     [RelayCommand]
     private void CloseDetail() => IsDetailOpen = false;
+
+    private static DateTimeOffset? ToUtcStart(DateTime? localDate)
+    {
+        if (localDate is null) return null;
+        var local = DateTime.SpecifyKind(localDate.Value.Date, DateTimeKind.Local);
+        return new DateTimeOffset(local).ToUniversalTime();
+    }
+
+    private static DateTimeOffset? ToUtcEnd(DateTime? localDate)
+    {
+        if (localDate is null) return null;
+        var local = DateTime.SpecifyKind(localDate.Value.Date.AddDays(1).AddTicks(-1), DateTimeKind.Local);
+        return new DateTimeOffset(local).ToUniversalTime();
+    }
 }
+
+public sealed record HistoryResultFilterOption(string Label, string? Value);

@@ -33,6 +33,7 @@ public sealed partial class ShellViewModel : ObservableObject
         _dashboardVm = new DashboardViewModel(connection);
         _siteInspectionVm = new SiteInspectionViewModel(connection);
         _siteInspectionVm.ReturnToDashboardRequested += () => NavigateDashboardCommand.Execute(null);
+        _siteInspectionVm.ConnectionLost += () => ConnectionLost?.Invoke();
         _historyVm = new HistoryViewModel(connection);
         _statisticsVm = new StatisticsViewModel(connection);
 
@@ -43,7 +44,7 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     // 07_통신프로토콜.md §6: 연결 실패 시 안내 후 재연결(여기서는 재로그인)을 유도한다.
-    // 로그아웃으로 인한 의도적 연결 종료와, 현장 검사 화면 자체의 재연결 흐름(SCR-04 안내문구·자체 재시도)은 제외한다.
+    // 로그아웃으로 인한 의도적 연결 종료와, 현장 검사 화면이 자체적으로 연결 끊김을 전달하는 경우는 제외한다.
     private void OnConnectionDisconnected()
     {
         if (_intentionalDisconnect) return;
@@ -54,7 +55,7 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private async Task NavigateDashboardAsync()
     {
-        await LeaveSiteInspectionIfNeededAsync();
+        if (!await LeaveSiteInspectionIfNeededAsync()) return;
         ActiveMenu = "dashboard";
         CurrentViewModel = _dashboardVm;
         await _dashboardVm.LoadAsync();
@@ -63,6 +64,8 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private async Task NavigateSiteInspectionAsync()
     {
+        if (ReferenceEquals(CurrentViewModel, _siteInspectionVm)) return;
+        if (!await LeaveSiteInspectionIfNeededAsync()) return;
         ActiveMenu = "site";
         CurrentViewModel = _siteInspectionVm;
         await _siteInspectionVm.EnterAsync();
@@ -71,7 +74,7 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private async Task NavigateHistoryAsync()
     {
-        await LeaveSiteInspectionIfNeededAsync();
+        if (!await LeaveSiteInspectionIfNeededAsync()) return;
         ActiveMenu = "history";
         CurrentViewModel = _historyVm;
         await _historyVm.LoadAsync(1);
@@ -80,7 +83,7 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private async Task NavigateStatisticsAsync()
     {
-        await LeaveSiteInspectionIfNeededAsync();
+        if (!await LeaveSiteInspectionIfNeededAsync()) return;
         ActiveMenu = "statistics";
         CurrentViewModel = _statisticsVm;
         await _statisticsVm.LoadAsync();
@@ -89,7 +92,7 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private async Task NavigatePlaceholderAsync(string title)
     {
-        await LeaveSiteInspectionIfNeededAsync();
+        if (!await LeaveSiteInspectionIfNeededAsync()) return;
         ActiveMenu = title;
         CurrentViewModel = new PlaceholderViewModel(title);
     }
@@ -97,7 +100,7 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private async Task LogoutAsync()
     {
-        await LeaveSiteInspectionIfNeededAsync();
+        if (!await LeaveSiteInspectionIfNeededAsync()) return;
         _intentionalDisconnect = true;
         try { await Connection.RequestAsync(MessageTypes.LogoutRequest, new LogoutRequestPayload(), TimeSpan.FromSeconds(3)); }
         catch (Exception) { /* 연결이 이미 끊겼으면 그냥 로그아웃 처리한다 */ }
@@ -105,9 +108,11 @@ public sealed partial class ShellViewModel : ObservableObject
         LoggedOut?.Invoke();
     }
 
-    private async Task LeaveSiteInspectionIfNeededAsync()
+    private async Task<bool> LeaveSiteInspectionIfNeededAsync()
     {
-        if (ReferenceEquals(CurrentViewModel, _siteInspectionVm))
-            await _siteInspectionVm.LeaveAsync();
+        if (!ReferenceEquals(CurrentViewModel, _siteInspectionVm)) return true;
+        if (!_siteInspectionVm.ConfirmLeave()) return false;
+        await _siteInspectionVm.LeaveAsync();
+        return true;
     }
 }

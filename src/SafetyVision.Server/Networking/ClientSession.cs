@@ -33,6 +33,10 @@ public sealed class ClientSession(
     private byte[]? _lastFrameJpeg;
     private SaveInspectionRequest? _pendingSave;
     private string _cameraName = "CAM 01";
+    private string? _authenticatedLoginId;
+    private bool _inspectionSessionActive;
+    private long _lastFrameSequence = -1;
+    private double _lastInferenceAt = double.NegativeInfinity;
 
     private sealed record AnalysisFrameRecord(byte[] Jpeg, IReadOnlyList<DetectedBox> Boxes, double PersonConfidence);
 
@@ -60,12 +64,17 @@ public sealed class ClientSession(
         }
         finally
         {
-            _stateMachine.Cancel(CancelReason.ConnectionClosed, NowSeconds());
+            ClearInspectionSession();
             try { client.Close(); } catch (Exception) { /* 연결 정리 과정의 예외는 무시한다 */ }
         }
     }
 
-    private Task DispatchAsync(Envelope envelope, CancellationToken ct) => envelope.Type switch
+    private Task DispatchAsync(Envelope envelope, CancellationToken ct) =>
+        _authenticatedLoginId is null && envelope.Type != MessageTypes.LoginRequest
+            ? RejectUnauthorizedAsync(envelope, ct)
+            : DispatchAuthenticatedAsync(envelope, ct);
+
+    private Task DispatchAuthenticatedAsync(Envelope envelope, CancellationToken ct) => envelope.Type switch
     {
         MessageTypes.LoginRequest => HandleLoginAsync(envelope, ct),
         MessageTypes.LogoutRequest => HandleLogoutAsync(envelope, ct),
@@ -81,12 +90,28 @@ public sealed class ClientSession(
         _ => TrySendErrorAsync(envelope.CorrelationId, ErrorCodes.InvalidRequest, "알 수 없는 메시지 유형입니다.", ct)
     };
 
+    private async Task RejectUnauthorizedAsync(Envelope envelope, CancellationToken ct)
+    {
+        // FrameMeta is followed by a binary image. Consume it before replying so the next envelope remains aligned.
+        if (envelope.Type == MessageTypes.FrameMeta)
+            await FrameCodec.ReadAsync(_stream, ct).ConfigureAwait(false);
+
+        logger.LogWarning("Unauthenticated request rejected: {Type}", envelope.Type);
+        await TrySendErrorAsync(envelope.CorrelationId, ErrorCodes.Unauthorized, "로그인이 필요합니다.", ct).ConfigureAwait(false);
+    }
+
     private async Task HandleLoginAsync(Envelope envelope, CancellationToken ct)
     {
         var req = envelope.DeserializePayload<LoginRequestPayload>();
         using var scope = scopeFactory.CreateScope();
         var auth = scope.ServiceProvider.GetRequiredService<AuthService>();
         var (success, displayName) = await auth.ValidateLoginAsync(req.LoginId, req.Password, ct).ConfigureAwait(false);
+
+        if (success)
+        {
+            ClearInspectionSession();
+            _authenticatedLoginId = req.LoginId;
+        }
 
         var payload = success
             ? new LoginResponsePayload(true, displayName, null)
@@ -96,7 +121,8 @@ public sealed class ClientSession(
 
     private async Task HandleLogoutAsync(Envelope envelope, CancellationToken ct)
     {
-        _stateMachine.Cancel(CancelReason.LoggedOut, NowSeconds());
+        ClearInspectionSession();
+        _authenticatedLoginId = null;
         await SendAsync(MessageTypes.LogoutResponse, envelope.CorrelationId, new LogoutResponsePayload(true), ct).ConfigureAwait(false);
     }
 
@@ -141,6 +167,8 @@ public sealed class ClientSession(
     private async Task HandleSessionStartAsync(Envelope envelope, CancellationToken ct)
     {
         var req = envelope.DeserializePayload<InspectionSessionStartPayload>();
+        ClearInspectionSession();
+        _inspectionSessionActive = true;
         if (!string.IsNullOrWhiteSpace(req.CameraName)) _cameraName = req.CameraName;
 
         var payload = new InspectionSessionStartedPayload(true, null, options.RoiLeft, options.RoiTop, options.RoiRight, options.RoiBottom);
@@ -149,10 +177,7 @@ public sealed class ClientSession(
 
     private Task HandleSessionEndAsync(Envelope envelope, CancellationToken ct)
     {
-        _stateMachine.Cancel(CancelReason.ScreenLeft, NowSeconds());
-        _analysisFrames.Clear();
-        _lastFrameJpeg = null;
-        _lastDetection = null;
+        ClearInspectionSession();
         return Task.CompletedTask;
     }
 
@@ -165,6 +190,29 @@ public sealed class ClientSession(
             return;
         }
 
+        var meta = envelope.DeserializePayload<FrameMetaPayload>();
+        if (!_inspectionSessionActive)
+        {
+            await TrySendErrorAsync(envelope.CorrelationId, ErrorCodes.InvalidRequest,
+                "검사 세션을 먼저 시작해 주세요.", ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (meta.SequenceNumber <= _lastFrameSequence)
+        {
+            await SendStateAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        _lastFrameSequence = meta.SequenceNumber;
+        if (double.IsFinite(_lastInferenceAt)
+            && NowSeconds() - _lastInferenceAt < 1.0 / options.MaxInferenceFps)
+        {
+            await SendStateAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        _lastInferenceAt = NowSeconds();
         _lastFrameJpeg = imageBytes;
 
         if (!detector.IsAvailable)
@@ -183,6 +231,7 @@ public sealed class ClientSession(
         {
             logger.LogError(ex, "추론 실패");
             _stateMachine.Cancel(CancelReason.InferenceError, NowSeconds());
+            ClearFrameBuffers();
             await TrySendErrorAsync(envelope.CorrelationId, ErrorCodes.InferenceError, "AI 분석 중 오류가 발생했습니다. 화면에 다시 진입해 주세요.", ct).ConfigureAwait(false);
             await SendStateAsync(ct).ConfigureAwait(false);
             return;
@@ -201,6 +250,7 @@ public sealed class ClientSession(
 
         bool wasInspecting = _stateMachine.State == InspectionState.Inspecting;
         int beforeCount = _stateMachine.FrameVotes.Count;
+        int beforeGeneration = _stateMachine.Generation;
         bool justCompleted = _stateMachine.ProcessFrame(eval, NowSeconds());
 
         if (wasInspecting && eval.Condition == PersonRoiCondition.Qualified && _stateMachine.FrameVotes.Count > beforeCount)
@@ -208,6 +258,9 @@ public sealed class ClientSession(
             var target = FrameAnalyzer.FindSingleRoiPerson(detection.Boxes, detection.Width, detection.Height, options);
             _analysisFrames.Add(new AnalysisFrameRecord(imageBytes, detection.Boxes, target?.Confidence ?? 0));
         }
+
+        if (_stateMachine.Generation != beforeGeneration)
+            ClearFrameBuffers();
 
         if (justCompleted)
             await OnInspectionCompletedAsync(ct).ConfigureAwait(false);
@@ -230,11 +283,24 @@ public sealed class ClientSession(
         var req = envelope.DeserializePayload<RetrySaveRequestPayload>();
         if (!Guid.TryParse(req.InspectionKey, out var key)
             || key != _stateMachine.InspectionKey
-            || _pendingSave is null
-            || !_stateMachine.TryRetrySave())
+            || _pendingSave is null)
         {
             await SendAsync(MessageTypes.SaveResultAck, envelope.CorrelationId,
                 new SaveResultAckPayload(SaveStatusCodes.SaveFailed, "재시도할 저장이 없습니다."), ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (_stateMachine.SaveState == SaveState.Saved)
+        {
+            await SendAsync(MessageTypes.SaveResultAck, envelope.CorrelationId,
+                new SaveResultAckPayload(SaveStatusCodes.Saved, null), ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (!_stateMachine.TryRetrySave())
+        {
+            await SendAsync(MessageTypes.SaveResultAck, envelope.CorrelationId,
+                new SaveResultAckPayload(SaveStatusCodes.SaveFailed, "재시도할 저장 결과가 없습니다."), ct).ConfigureAwait(false);
             return;
         }
 
@@ -401,6 +467,24 @@ public sealed class ClientSession(
         {
             // 연결이 이미 끊겼으면 오류 통지도 보낼 수 없다.
         }
+    }
+
+    private void ClearFrameBuffers()
+    {
+        _analysisFrames.Clear();
+        _lastFrameJpeg = null;
+        _lastDetection = null;
+        _lastFrameSequence = -1;
+        _lastInferenceAt = double.NegativeInfinity;
+    }
+
+    private void ClearInspectionSession()
+    {
+        _stateMachine.DiscardAndReturnToWaiting();
+        ClearFrameBuffers();
+        _inspectionSessionActive = false;
+        _pendingSave = null;
+        _cameraName = "CAM 01";
     }
 
     private static string StateCode(InspectionState s) => s switch

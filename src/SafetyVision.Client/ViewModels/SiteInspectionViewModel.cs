@@ -24,6 +24,12 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     private VideoCapture? _capture;
     private Thread? _captureThread;
     private volatile bool _captureRunning;
+    private readonly object _frameSendGate = new();
+    private PendingFrame? _latestFrame;
+    private CancellationTokenSource? _frameSenderCts;
+    private Task? _frameSenderTask;
+
+    private sealed record PendingFrame(FrameMetaPayload Meta, byte[] Jpeg);
 
     public SiteInspectionViewModel(ServerConnection connection)
     {
@@ -95,7 +101,14 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     };
 
     public event Action? ReturnToDashboardRequested;
+    public event Action? ConnectionLost;
     public event Func<bool>? ConfirmDiscardUnsavedRequested;
+
+    public bool ConfirmLeave()
+    {
+        if (SaveState != SaveStatusCodes.SaveFailed) return true;
+        return ConfirmDiscardUnsavedRequested?.Invoke() ?? true;
+    }
 
     public async Task EnterAsync()
     {
@@ -119,8 +132,7 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
         if (!_capture.IsOpened())
         {
             CameraErrorMessage = "카메라를 사용할 수 없습니다. 연결을 확인해 주세요.";
-            try { await _connection.SendAsync(MessageTypes.InspectionSessionEnd, new InspectionSessionEndPayload("camera_error")); }
-            catch (Exception) { /* 세션이 이미 없으면 무시 */ }
+            await LeaveAsync();
             return;
         }
 
@@ -131,14 +143,19 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
         FrameWidth = reportedWidth > 0 ? reportedWidth : ClientSettings.CameraWidth;
         FrameHeight = reportedHeight > 0 ? reportedHeight : ClientSettings.CameraHeight;
 
-        await StartSessionAsync();
+        if (!await StartSessionAsync())
+        {
+            await LeaveAsync();
+            return;
+        }
 
         _captureRunning = true;
+        _frameSenderCts = new CancellationTokenSource();
         _captureThread = new Thread(CaptureLoop) { IsBackground = true };
         _captureThread.Start();
     }
 
-    private async Task StartSessionAsync()
+    private async Task<bool> StartSessionAsync()
     {
         try
         {
@@ -151,15 +168,18 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
                 RoiRight = started.RoiRight;
                 RoiBottom = started.RoiBottom;
                 ConnectionMessage = null;
+                return true;
             }
             else
             {
                 ConnectionMessage = started.ErrorMessage ?? "현장 검사 세션을 시작하지 못했습니다.";
+                return false;
             }
         }
         catch (Exception)
         {
-            ConnectionMessage = "서버 연결이 끊겼습니다. 재연결을 시도합니다.";
+            ConnectionMessage = "서버 연결이 끊겼습니다. 다시 로그인해 주세요.";
+            return false;
         }
     }
 
@@ -171,6 +191,8 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
         _capture?.Release();
         _capture?.Dispose();
         _capture = null;
+
+        await StopFrameSenderAsync();
 
         _connection.StateChanged -= OnStateChanged;
         _connection.ResultReceived -= OnResultReceived;
@@ -215,15 +237,71 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
                 seq++;
                 Cv2.ImEncode(".jpg", mat, out var jpegBytes, new ImageEncodingParam(ImwriteFlags.JpegQuality, ClientSettings.FrameJpegQuality));
                 var meta = new FrameMetaPayload(seq, DateTimeOffset.UtcNow, mat.Width, mat.Height);
-                _ = SendFrameSafeAsync(meta, jpegBytes);
+                QueueFrame(meta, jpegBytes);
             }
         }
     }
 
-    private async Task SendFrameSafeAsync(FrameMetaPayload meta, byte[] jpeg)
+    private void QueueFrame(FrameMetaPayload meta, byte[] jpeg)
     {
-        try { await _connection.SendFrameAsync(meta, jpeg); }
-        catch (Exception) { /* 연결 문제는 Disconnected 이벤트로 처리한다 */ }
+        lock (_frameSendGate)
+        {
+            if (!_captureRunning || _frameSenderCts is null) return;
+            _latestFrame = new PendingFrame(meta, jpeg);
+            if (_frameSenderTask is null || _frameSenderTask.IsCompleted)
+                _frameSenderTask = SendLatestFramesAsync(_frameSenderCts.Token);
+        }
+    }
+
+    private async Task SendLatestFramesAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                PendingFrame? next;
+                lock (_frameSendGate)
+                {
+                    if (!_captureRunning || _latestFrame is null) return;
+                    next = _latestFrame;
+                    _latestFrame = null;
+                }
+
+                try
+                {
+                    await _connection.SendFrameAsync(next.Meta, next.Jpeg, ct);
+                }
+                catch (Exception) when (!ct.IsCancellationRequested)
+                {
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task StopFrameSenderAsync()
+    {
+        Task? senderTask;
+        CancellationTokenSource? senderCts;
+        lock (_frameSendGate)
+        {
+            _latestFrame = null;
+            senderCts = _frameSenderCts;
+            _frameSenderCts = null;
+            senderTask = _frameSenderTask;
+            _frameSenderTask = null;
+            senderCts?.Cancel();
+        }
+
+        if (senderTask is not null)
+        {
+            try { await senderTask.ConfigureAwait(false); }
+            catch (Exception) { /* sender shutdown is best effort */ }
+        }
+        senderCts?.Dispose();
     }
 
     private void OnStateChanged(InspectionStateChangedPayload payload)
@@ -282,26 +360,16 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
 
     private void OnDisconnected()
     {
-        _dispatcher.BeginInvoke(() => ConnectionMessage = "서버 연결이 끊겼습니다. 재연결을 시도합니다.");
-        _ = TryReconnectAsync();
+        if (!_captureRunning) return;
+        _captureRunning = false;
+        _ = HandleDisconnectedAsync();
     }
 
-    private async Task TryReconnectAsync()
+    private async Task HandleDisconnectedAsync()
     {
-        bool ok = await _connection.ConnectWithRetryAsync(5, TimeSpan.FromSeconds(2));
-        await _dispatcher.InvokeAsync(async () =>
-        {
-            if (ok)
-            {
-                ConnectionMessage = null;
-                State = "WAITING"; // 재연결은 새 세션으로 간주하며 이전 상태를 복구하지 않는다.
-                await StartSessionAsync();
-            }
-            else
-            {
-                ConnectionMessage = "서버에 연결할 수 없습니다. 연결을 확인해 주세요.";
-            }
-        });
+        await _dispatcher.InvokeAsync(() => ConnectionMessage = "서버 연결이 끊겼습니다. 다시 로그인해 주세요.");
+        await LeaveAsync();
+        await _dispatcher.InvokeAsync(() => ConnectionLost?.Invoke());
     }
 
     [RelayCommand]
@@ -323,11 +391,6 @@ public sealed partial class SiteInspectionViewModel : ObservableObject
     [RelayCommand]
     private void ReturnToDashboard()
     {
-        if (SaveState == SaveStatusCodes.SaveFailed)
-        {
-            bool proceed = ConfirmDiscardUnsavedRequested?.Invoke() ?? true;
-            if (!proceed) return;
-        }
         ReturnToDashboardRequested?.Invoke();
     }
 }

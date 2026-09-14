@@ -1,3 +1,6 @@
+using System.Data.Common;
+using System.Net;
+
 namespace SafetyVision.Core.Configuration;
 
 public sealed class SafetyVisionOptions
@@ -46,12 +49,14 @@ public sealed class SafetyVisionOptions
     public double VestBottomRatio { get; set; } = 0.75;
 
     public int JpegQuality { get; set; } = 90;
+    public string ListenAddress { get; set; } = "127.0.0.1";
     public int ListenPort { get; set; } = 8910;
 
     public ConnectionStringsOptions ConnectionStrings { get; set; } = new();
 
     public IEnumerable<string> Validate()
     {
+        if (!IPAddress.TryParse(ListenAddress, out _)) yield return "ListenAddress must be a valid IP address.";
         if (DetectionConfidence is < 0 or > 1) yield return "DetectionConfidence는 0~1 사이여야 합니다.";
         if (NmsIouThreshold is < 0 or > 1) yield return "NmsIouThreshold는 0~1 사이여야 합니다.";
         if (!(RoiLeft >= 0 && RoiLeft < RoiRight && RoiRight <= 1)) yield return "RoiLeft < RoiRight 이며 0~1 범위여야 합니다.";
@@ -69,7 +74,32 @@ public sealed class SafetyVisionOptions
         if (DecisionRatio is <= 0.5 or > 1) yield return "DecisionRatio는 0.5 초과 1 이하여야 합니다.";
         if (JpegQuality is < 1 or > 100) yield return "JpegQuality는 1~100 사이여야 합니다.";
         if (ListenPort is <= 0 or > 65535) yield return "ListenPort는 1~65535 사이여야 합니다.";
-        if (string.IsNullOrWhiteSpace(ConnectionStrings.MySql)) yield return "ConnectionStrings:MySql이 비어 있습니다.";
+        if (string.IsNullOrWhiteSpace(ConnectionStrings.MySql))
+        {
+            yield return "ConnectionStrings:MySql이 비어 있습니다.";
+        }
+        else
+        {
+            var connectionError = ValidateConnectionString(ConnectionStrings.MySql);
+            if (connectionError is not null) yield return connectionError;
+        }
+    }
+
+    private static string? ValidateConnectionString(string connectionString)
+    {
+        try
+        {
+            var connectionBuilder = new DbConnectionStringBuilder { ConnectionString = connectionString };
+            var hasPassword = connectionBuilder.TryGetValue("Password", out var password)
+                || connectionBuilder.TryGetValue("Pwd", out password);
+            return !hasPassword || string.IsNullOrWhiteSpace(Convert.ToString(password))
+                ? "ConnectionStrings:MySql에 Password 설정이 필요합니다."
+                : null;
+        }
+        catch (ArgumentException)
+        {
+            return "ConnectionStrings:MySql의 연결 문자열 형식이 올바르지 않습니다.";
+        }
     }
 }
 

@@ -13,13 +13,37 @@
             <Border Grid.Row="1" Style="{StaticResource CardStyle}">
                 <Grid>
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <DataGrid Grid.Row="0" x:Name="HistoryGrid" ItemsSource="{Binding Rows}" AutoGenerateColumns="False" IsReadOnly="True"
+                    <Grid Grid.Row="0" Margin="0,0,0,14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="180"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="기간" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <DatePicker Grid.Column="1" SelectedDate="{Binding FromDate, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Column="2" Text="~" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="8,0"/>
+                        <DatePicker Grid.Column="3" SelectedDate="{Binding ToDate, UpdateSourceTrigger=PropertyChanged}"/>
+                        <ComboBox Grid.Column="4" ItemsSource="{Binding ResultFilterOptions}" DisplayMemberPath="Label"
+                                  SelectedItem="{Binding SelectedResultFilter}" Margin="16,0,0,0"/>
+                        <Button Grid.Column="6" Content="조회" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding ApplyFiltersCommand}"
+                                Width="78" Margin="8,0,0,0"/>
+                        <Button Grid.Column="7" Content="초기화" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding ResetFiltersCommand}"
+                                Width="78" Margin="8,0,0,0"/>
+                    </Grid>
+
+                    <DataGrid Grid.Row="1" x:Name="HistoryGrid" ItemsSource="{Binding Rows}" AutoGenerateColumns="False" IsReadOnly="True"
                               HeadersVisibility="Column" GridLinesVisibility="None" RowHeight="64"
                               BorderThickness="0" Background="Transparent" RowBackground="Transparent"
                               AlternatingRowBackground="#F9FAFB" HorizontalGridLinesBrush="#E5E7EB"
@@ -109,12 +133,12 @@
                         </DataGrid.Columns>
                     </DataGrid>
 
-                    <TextBlock Grid.Row="1" Text="더블클릭하면 상세 결과를 볼 수 있습니다." FontSize="13" Foreground="{StaticResource TextSecondaryBrush}" Margin="4,10,0,0"/>
+                    <TextBlock Grid.Row="2" Text="더블클릭하면 상세 결과를 볼 수 있습니다." FontSize="13" Foreground="{StaticResource TextSecondaryBrush}" Margin="4,10,0,0"/>
 
-                    <TextBlock Grid.Row="2" Text="{Binding ErrorMessage}" Foreground="{StaticResource DangerBrush}" FontSize="15" Margin="0,8,0,0"
+                    <TextBlock Grid.Row="3" Text="{Binding ErrorMessage}" Foreground="{StaticResource DangerBrush}" FontSize="15" Margin="0,8,0,0"
                                Visibility="{Binding ErrorMessage, Converter={StaticResource NullToVisibilityConverter}}"/>
 
-                    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20,0,0">
+                    <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20,0,0">
                         <Button Content="← 이전" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding PreviousPageCommand}"
                                 IsEnabled="{Binding CanGoPrevious}" Margin="0,0,12,0" Width="90" FontSize="15"/>
                         <Border Background="#F3F4F6" CornerRadius="6" Padding="16,8" VerticalAlignment="Center">

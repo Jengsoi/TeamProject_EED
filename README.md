@@ -27,14 +27,14 @@ GRANT ALL PRIVILEGES ON safetyvision.* TO 'safetyvision_app'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
-연결 문자열은 `src/SafetyVision.Server/appsettings.json`의 `ConnectionStrings:MySql`에 설정한다.
+`src/SafetyVision.Server/appsettings.json`에는 비밀번호를 저장하지 않는다. 서버 실행 전에 `ConnectionStrings__MySql` 환경 변수로 전체 연결 문자열을 주입한다.
 **비밀번호는 이 문서에 원문으로 남기지 않는다** — 발표 환경 값은 팀 내 별도 공유.
 
 마이그레이션 적용(최초 1회, 이후 서버가 기동 시 자동 적용):
 
 ```powershell
 dotnet tool install --global dotnet-ef --version 9.0.20
-$env:SAFETYVISION_MYSQL_CONNSTR = "Server=localhost;Port=3306;Database=safetyvision;User=safetyvision_app;Password=<비밀번호>;"
+$env:SAFETYVISION_MYSQL_CONNSTR = "Server=localhost;Port=3306;Database=safetyvision;User=safetyvision_app;Password=<비밀번호>;SslMode=None;AllowPublicKeyRetrieval=True;"
 dotnet ef database update --project src/SafetyVision.Data --startup-project src/SafetyVision.Data
 ```
 
@@ -54,19 +54,21 @@ Start-Service MySQL84
 ## 4. 초기 계정
 
 - ID: `admin`
-- 비밀번호: `SafetyVision!2026` (최초 DB 생성 시 서버가 1회 Seed, PBKDF2-HMAC-SHA256 600,000회 해시로 저장, 재실행 시 재설정하지 않음)
+- 비밀번호: 프로젝트 기본값은 `SafetyVision!2026`이며, 최초 배포 전 `SAFETYVISION_ADMIN_INITIAL_PASSWORD` 환경 변수로 일회성 운영 비밀번호를 지정한다. 서버는 최초 생성 시 1회만 Seed하고 PBKDF2-HMAC-SHA256 600,000회 해시로 저장하며, 재실행 시 재설정하지 않는다.
 
 ## 5. 실행
 
 ```powershell
 # 서버
+$env:ConnectionStrings__MySql = "Server=localhost;Port=3306;Database=safetyvision;User=safetyvision_app;Password=<비밀번호>;SslMode=None;AllowPublicKeyRetrieval=True;"
+$env:SAFETYVISION_ADMIN_INITIAL_PASSWORD = "<최초 관리자 비밀번호>"
 dotnet run --project src/SafetyVision.Server
 
 # 클라이언트 (별도 터미널/PC)
 dotnet run --project src/SafetyVision.Client
 ```
 
-서버 기본 리슨 포트: `8910` (`appsettings.json`의 `ListenPort`).
+서버 기본 리슨 주소/포트: `127.0.0.1:8910` (`appsettings.json`의 `ListenAddress`/`ListenPort`). 다른 PC에서 접속할 때만 사설망 IP로 `ListenAddress`를 명시하고 TCP 구간은 TLS 또는 VPN으로 보호한다.
 
 ## 6. 설정값과 근거
 
@@ -92,11 +94,11 @@ Core/Protocol 순수 로직 테스트는 별도 설정 없이 바로 실행된�
 ```powershell
 # 최초 1회
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS safetyvision_test CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; GRANT ALL PRIVILEGES ON safetyvision_test.* TO 'safetyvision_app'@'localhost';"
-$env:SAFETYVISION_MYSQL_CONNSTR = "Server=localhost;Port=3306;Database=safetyvision_test;User=safetyvision_app;Password=<비밀번호>;"
+$env:SAFETYVISION_MYSQL_CONNSTR = "Server=localhost;Port=3306;Database=safetyvision_test;User=safetyvision_app;Password=<비밀번호>;SslMode=None;AllowPublicKeyRetrieval=True;"
 dotnet ef database update --project src/SafetyVision.Data --startup-project src/SafetyVision.Data
 
 # 테스트 실행 시
-$env:SAFETYVISION_TEST_MYSQL_CONNSTR = "Server=localhost;Port=3306;Database=safetyvision_test;User=safetyvision_app;Password=<비밀번호>;"
+$env:SAFETYVISION_TEST_MYSQL_CONNSTR = "Server=localhost;Port=3306;Database=safetyvision_test;User=safetyvision_app;Password=<비밀번호>;SslMode=None;AllowPublicKeyRetrieval=True;"
 dotnet test tests/SafetyVision.Tests
 ```
 
@@ -105,11 +107,11 @@ dotnet test tests/SafetyVision.Tests
 ## 8. Day1~6 검증 결과 요약
 
 - `dotnet build` (Client/Server/Core/Protocol/Data) 전체 0 오류.
-- xUnit 44개 테스트 통과: 판정 로직 7개 예제, 상태 머신 시나리오, ROI/PPE 연결(모호한 PPE 제외 포함), TCP 프레이밍(정상/분할 전송/경계값 초과/음수 길이/빈 페이로드), PBKDF2, **DB 통합(동일 InspectionKey 재시도 중복 방지, 항목 정확히 3개, 통계 분모에 NOT_WORN/UNKNOWN 포함, 0건 처리, 최근 10건 정렬)**.
+- xUnit 48개 테스트 통과: 판정 로직 7개 예제, 상태 머신 시나리오, ROI/PPE 연결(모호한 PPE 제외 포함), TCP 프레이밍(정상/분할 전송/경계값 초과/음수 길이/빈 페이로드), PBKDF2, 설정 검증(비밀번호·리슨 주소), **DB 통합(동일 InspectionKey 재시도 중복 방지, 항목 정확히 3개, 통계 분모에 NOT_WORN/UNKNOWN 포함, 0건 처리, 최근 10건 정렬)**.
 - 실제 ONNX 모델 로드 및 metadata 검증 성공. **실제 정지 이미지(목업의 작업자 사진)로 추론까지 실행해 Safety Vest(conf 0.61~0.67), Hardhat(conf 0.44~0.68)를 실제로 검출함을 확인**(letterbox 전처리 → 세션 실행 → NMS 후처리 → 좌표 역변환 전체 경로가 실동작). 이 사진에서는 인물이 상반신 위주로 잘려 있어 Person 클래스는 임계값 이상으로 잡히지 않았는데, 이는 사진 구도 문제이지 클래스 매핑 오류가 아니다(다른 클래스는 정상 매핑·검출됨). 실제 웹캠 전신 샷에서 재확인 필요.
 - 실제 MySQL 연결, 마이그레이션 적용, admin Seed 확인.
 - 실제 TCP 클라이언트로 로그인 실패/성공, 대시보드 조회 End-to-End 확인.
-- WPF 클라이언트(로그인/대시보드/현장검사/결과/이력) 구현 완료, 전체 솔루션 빌드 확인. 연결 끊김 시 대시보드/이력 화면은 로그인 화면으로 복귀 안내, 현장 검사 화면은 자체 재연결(최대 5회) 후 실패 시 안내.
+- WPF 클라이언트(로그인/대시보드/현장검사/결과/이력) 구현 완료, 전체 솔루션 빌드 확인. 연결 끊김 시 모든 화면은 현재 세션을 폐기하고 로그인 화면으로 복귀 안내.
 
 ## 9. Day6 예외·경계 시나리오 실행 검증
 
