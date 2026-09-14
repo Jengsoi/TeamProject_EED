@@ -47,6 +47,7 @@ public sealed class ClientSession(
     private DetectionFrame? _lastDetection;
     private byte[]? _lastFrameJpeg;
     private SaveInspectionRequest? _pendingSave;
+    private bool _isAuthenticated;
     private (int Width, int Height)? _loggedResolution;
     private double _lastDiagFrameSaveAt = double.NegativeInfinity;
     private double? _lastProcessedAt; // [TEMP-DIAG] 프레임 처리 간격 실측용. 원인 파악 후 제거할 것.
@@ -93,20 +94,34 @@ public sealed class ClientSession(
         }
     }
 
-    private Task DispatchAsync(Envelope envelope, CancellationToken ct) => envelope.Type switch
+    private async Task DispatchAsync(Envelope envelope, CancellationToken ct)
     {
-        MessageTypes.LoginRequest => HandleLoginAsync(envelope, ct),
-        MessageTypes.LogoutRequest => HandleLogoutAsync(envelope, ct),
-        MessageTypes.DashboardStatsRequest => HandleDashboardStatsAsync(envelope, ct),
-        MessageTypes.InspectionSessionStart => HandleSessionStartAsync(envelope, ct),
-        MessageTypes.FrameMeta => HandleFrameMetaAsync(envelope, ct),
-        MessageTypes.RetryInspectionRequest => HandleRetryInspectionAsync(envelope, ct),
-        MessageTypes.RetrySaveRequest => HandleRetrySaveAsync(envelope, ct),
-        MessageTypes.InspectionSessionEnd => HandleSessionEndAsync(envelope, ct),
-        MessageTypes.HistoryPageRequest => HandleHistoryPageAsync(envelope, ct),
-        MessageTypes.InspectionDetailRequest => HandleInspectionDetailAsync(envelope, ct),
-        _ => TrySendErrorAsync(envelope.CorrelationId, ErrorCodes.InvalidRequest, "알 수 없는 메시지 유형입니다.", ct)
-    };
+        if (envelope.Type != MessageTypes.LoginRequest && !_isAuthenticated)
+        {
+            // FrameMeta 바로 뒤에는 이미지 프레임이 붙는다. 인증 오류라도 이를 소비해야
+            // 다음 메시지의 프레이밍 경계가 깨지지 않는다.
+            if (envelope.Type == MessageTypes.FrameMeta)
+                await FrameCodec.ReadAsync(_stream, ct).ConfigureAwait(false);
+            await TrySendErrorAsync(envelope.CorrelationId, ErrorCodes.Unauthorized,
+                "로그인이 필요한 요청입니다.", ct).ConfigureAwait(false);
+            return;
+        }
+
+        await (envelope.Type switch
+        {
+            MessageTypes.LoginRequest => HandleLoginAsync(envelope, ct),
+            MessageTypes.LogoutRequest => HandleLogoutAsync(envelope, ct),
+            MessageTypes.DashboardStatsRequest => HandleDashboardStatsAsync(envelope, ct),
+            MessageTypes.InspectionSessionStart => HandleSessionStartAsync(envelope, ct),
+            MessageTypes.FrameMeta => HandleFrameMetaAsync(envelope, ct),
+            MessageTypes.RetryInspectionRequest => HandleRetryInspectionAsync(envelope, ct),
+            MessageTypes.RetrySaveRequest => HandleRetrySaveAsync(envelope, ct),
+            MessageTypes.InspectionSessionEnd => HandleSessionEndAsync(envelope, ct),
+            MessageTypes.HistoryPageRequest => HandleHistoryPageAsync(envelope, ct),
+            MessageTypes.InspectionDetailRequest => HandleInspectionDetailAsync(envelope, ct),
+            _ => TrySendErrorAsync(envelope.CorrelationId, ErrorCodes.InvalidRequest, "알 수 없는 메시지 유형입니다.", ct)
+        }).ConfigureAwait(false);
+    }
 
     private async Task HandleLoginAsync(Envelope envelope, CancellationToken ct)
     {
@@ -114,6 +129,7 @@ public sealed class ClientSession(
         using var scope = scopeFactory.CreateScope();
         var auth = scope.ServiceProvider.GetRequiredService<AuthService>();
         var (success, displayName) = await auth.ValidateLoginAsync(req.LoginId, req.Password, ct).ConfigureAwait(false);
+        _isAuthenticated = success;
 
         var payload = success
             ? new LoginResponsePayload(true, displayName, null)
@@ -123,6 +139,7 @@ public sealed class ClientSession(
 
     private async Task HandleLogoutAsync(Envelope envelope, CancellationToken ct)
     {
+        _isAuthenticated = false;
         await _stateLock.WaitAsync(ct).ConfigureAwait(false);
         try { _stateMachine.Cancel(CancelReason.LoggedOut, NowSeconds()); }
         finally { _stateLock.Release(); }
@@ -237,7 +254,11 @@ public sealed class ClientSession(
         {
             logger.LogError(ex, "추론 실패");
             await _stateLock.WaitAsync(ct).ConfigureAwait(false);
-            try { _stateMachine.Cancel(CancelReason.InferenceError, NowSeconds()); }
+            try
+            {
+                _stateMachine.Cancel(CancelReason.InferenceError, NowSeconds());
+                _analysisFrames.Clear();
+            }
             finally { _stateLock.Release(); }
             await TrySendErrorAsync(envelope.CorrelationId, ErrorCodes.InferenceError, "AI 분석 중 오류가 발생했습니다. 화면에 다시 진입해 주세요.", ct).ConfigureAwait(false);
             await SendStateAsync(ct).ConfigureAwait(false);
@@ -303,7 +324,11 @@ public sealed class ClientSession(
             _lastDetection = detection;
             bool wasInspecting = _stateMachine.State == InspectionState.Inspecting;
             int beforeCount = _stateMachine.FrameVotes.Count;
+            int beforeGeneration = _stateMachine.Generation;
             justCompleted = _stateMachine.ProcessFrame(eval, NowSeconds());
+
+            if (_stateMachine.Generation != beforeGeneration)
+                _analysisFrames.Clear();
 
             if (wasInspecting && eval.Condition == PersonRoiCondition.Qualified && _stateMachine.FrameVotes.Count > beforeCount)
             {
@@ -327,7 +352,8 @@ public sealed class ClientSession(
             if (_lastDetection is not null)
             {
                 var eval = FrameAnalyzer.Evaluate(_lastDetection.Boxes, _lastDetection.Width, _lastDetection.Height, options);
-                _stateMachine.TryRetry(eval, NowSeconds());
+                if (_stateMachine.TryRetry(eval, NowSeconds()))
+                    _analysisFrames.Clear();
             }
         }
         finally { _stateLock.Release(); }
@@ -407,8 +433,8 @@ public sealed class ClientSession(
             inspection.Id, new DateTimeOffset(DateTime.SpecifyKind(inspection.InspectedAt, DateTimeKind.Utc)),
             items, inspection.Result, imageBytes is not null, missingMessage);
 
-        await SendAsync(MessageTypes.InspectionDetailResponse, envelope.CorrelationId, payload, ct).ConfigureAwait(false);
-        if (imageBytes is not null) await SendImageAsync(imageBytes, ct).ConfigureAwait(false);
+        await SendWithOptionalImageAsync(
+            MessageTypes.InspectionDetailResponse, envelope.CorrelationId, payload, imageBytes, ct).ConfigureAwait(false);
     }
 
     private async Task OnInspectionCompletedAsync(CancellationToken ct)
@@ -444,11 +470,18 @@ public sealed class ClientSession(
         }
         finally { _stateLock.Release(); }
 
-        await SendResultMessageAsync(inspectionKey, outcome, representativeJpeg, ct).ConfigureAwait(false);
-        await PersistPendingSaveAsync(ct).ConfigureAwait(false);
+        // 저장은 클라이언트 연결 상태와 무관하게 먼저 끝낸다. 결과 전송이 실패해도 이력은 남는다.
+        await PersistPendingSaveAsync(ct, notifyClient: false).ConfigureAwait(false);
+
+        string saveState;
+        await _stateLock.WaitAsync(ct).ConfigureAwait(false);
+        try { saveState = SaveStateCode(_stateMachine.SaveState); }
+        finally { _stateLock.Release(); }
+
+        await SendResultMessageAsync(inspectionKey, outcome, representativeJpeg, saveState, ct).ConfigureAwait(false);
     }
 
-    private async Task PersistPendingSaveAsync(CancellationToken ct)
+    private async Task PersistPendingSaveAsync(CancellationToken ct, bool notifyClient = true)
     {
         SaveInspectionRequest? pending;
         await _stateLock.WaitAsync(ct).ConfigureAwait(false);
@@ -469,6 +502,9 @@ public sealed class ClientSession(
         }
         finally { _stateLock.Release(); }
 
+        if (!notifyClient)
+            return;
+
         if (result.Outcome == SaveOutcome.Success)
         {
             await SendAsync(MessageTypes.SaveResultAck, Guid.NewGuid(), new SaveResultAckPayload(SaveStatusCodes.Saved, null), ct).ConfigureAwait(false);
@@ -480,23 +516,31 @@ public sealed class ClientSession(
         }
     }
 
-    private Task SendResultMessageAsync(Guid inspectionKey, InspectionOutcome outcome, byte[]? representativeJpeg, CancellationToken ct)
+    private Task SendResultMessageAsync(Guid inspectionKey, InspectionOutcome outcome, byte[]? representativeJpeg, string saveState, CancellationToken ct)
     {
         var items = outcome.Items
             .Select(i => new EquipmentResultPayload(EquipmentClassMap.ToDbCode(i.Code), i.Status.ToDbCode(), i.Score))
             .ToList();
         var payload = new InspectionResultPayload(
             inspectionKey.ToString(), outcome.Result.ToDbCode(), items,
-            representativeJpeg is not null, SaveStatusCodes.Saving);
+            representativeJpeg is not null, saveState);
 
-        return SendWithOptionalImageAsync(MessageTypes.InspectionResult, payload, representativeJpeg, ct);
+        return SendWithOptionalImageAsync(MessageTypes.InspectionResult, Guid.NewGuid(), payload, representativeJpeg, ct);
     }
 
-    private async Task SendWithOptionalImageAsync<T>(string type, T payload, byte[]? image, CancellationToken ct)
+    private async Task SendWithOptionalImageAsync<T>(string type, Guid correlationId, T payload, byte[]? image, CancellationToken ct)
     {
-        var correlationId = Guid.NewGuid();
-        await SendAsync(type, correlationId, payload, ct).ConfigureAwait(false);
-        if (image is not null) await SendImageAsync(image, ct).ConfigureAwait(false);
+        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await ProtocolMessage.SendAsync(_stream, type, correlationId, payload, ct).ConfigureAwait(false);
+            if (image is not null)
+                await ProtocolMessage.SendImageAsync(_stream, image, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     private async Task SendStateAsync(CancellationToken ct)

@@ -32,6 +32,7 @@ public sealed partial class ShellViewModel : ObservableObject
         _dashboardVm = new DashboardViewModel(connection);
         _siteInspectionVm = new SiteInspectionViewModel(connection);
         _siteInspectionVm.ReturnToDashboardRequested += () => NavigateDashboardCommand.Execute(null);
+        _siteInspectionVm.ReauthenticationRequired += OnReauthenticationRequired;
         _historyVm = new HistoryViewModel(connection);
 
         Connection.Disconnected += OnConnectionDisconnected;
@@ -47,6 +48,12 @@ public sealed partial class ShellViewModel : ObservableObject
         if (_intentionalDisconnect) return;
         if (ReferenceEquals(CurrentViewModel, _siteInspectionVm)) return;
         System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => ConnectionLost?.Invoke());
+    }
+
+    private void OnReauthenticationRequired()
+    {
+        Connection.Dispose();
+        ConnectionLost?.Invoke();
     }
 
     [RelayCommand]

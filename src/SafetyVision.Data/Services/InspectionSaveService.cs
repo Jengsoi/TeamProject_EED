@@ -28,6 +28,9 @@ public sealed class InspectionSaveService(SafetyVisionDbContext db, ILogger<Insp
     public async Task<SaveInspectionResult> SaveAsync(SaveInspectionRequest request, CancellationToken ct)
     {
         await SaveGate.WaitAsync(ct);
+        string? tempFile = null;
+        string? finalFile = null;
+        bool committed = false;
         try
         {
             var existing = await db.Inspections.FirstOrDefaultAsync(i => i.InspectionKey == request.InspectionKey, ct);
@@ -37,7 +40,7 @@ public sealed class InspectionSaveService(SafetyVisionDbContext db, ILogger<Insp
             string dateDir = request.InspectedAtUtc.ToLocalTime().ToString("yyyyMMdd");
             string snapshotDir = Path.Combine(root, "SafetyVision", "snapshots", dateDir);
             Directory.CreateDirectory(snapshotDir);
-            string tempFile = Path.Combine(snapshotDir, $"tmp_{Guid.NewGuid():N}.jpg");
+            tempFile = Path.Combine(snapshotDir, $"tmp_{Guid.NewGuid():N}.jpg");
 
             try
             {
@@ -76,30 +79,43 @@ public sealed class InspectionSaveService(SafetyVisionDbContext db, ILogger<Insp
 
                 string finalFileName = $"inspection_{inspection.Id}.jpg";
                 string finalRelativePath = Path.Combine("snapshots", dateDir, finalFileName);
+                finalFile = Path.Combine(snapshotDir, finalFileName);
                 bool hasImage = File.Exists(tempFile);
                 inspection.ImagePath = hasImage ? finalRelativePath : "";
                 await db.SaveChangesAsync(ct);
 
                 if (hasImage)
-                    File.Move(tempFile, Path.Combine(snapshotDir, finalFileName), overwrite: true);
+                    File.Move(tempFile, finalFile, overwrite: true);
 
                 await tx.CommitAsync(ct);
+                committed = true;
                 return new SaveInspectionResult(SaveOutcome.Success, inspection.Id);
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "검사 결과 저장 실패 (InspectionKey={Key})", request.InspectionKey);
-                if (File.Exists(tempFile))
-                {
-                    try { File.Delete(tempFile); } catch (IOException) { /* best effort */ }
-                }
                 return new SaveInspectionResult(SaveOutcome.Failed, null);
             }
         }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "검사 결과 저장 준비 실패 (InspectionKey={Key})", request.InspectionKey);
+            return new SaveInspectionResult(SaveOutcome.Failed, null);
+        }
         finally
         {
+            DeleteBestEffort(tempFile);
+            // 정상 커밋 후에는 DB가 이 파일을 참조하므로 보존한다. 실패 반환 경로에서만 finalFile이 남는다.
+            if (!committed)
+                DeleteBestEffort(finalFile);
             SaveGate.Release();
         }
+    }
+
+    private static void DeleteBestEffort(string? path)
+    {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
+        try { File.Delete(path); } catch (IOException) { /* 다음 정리 기회까지 보존 */ }
     }
 
     public string ResolveImageFullPath(string relativePath) =>
