@@ -88,23 +88,16 @@ dotnet run --project src/SafetyVision.Client
 |---|---|---|
 | ModelInputSize | 896 | `safetyvision_v2_896.onnx` 입력 크기 |
 | DetectionConfidence | 0.40 | 착용 클래스 기본값(SafetyVest는 0.40에서 안정적) |
-| NoWearDetectionConfidence | 0.005 | 단일 Person 보정 이미지에서 미착용 근거를 가장 많이 보존한 값. 여러 프레임 다수결 전에는 확정하지 않음 |
-| HardhatDetectionConfidence | 0.005 | 단일 Person 착용 안전모 13/13을 보존한 값. 같은 사람의 NO-Hardhat과는 신뢰도 비교로 충돌 해소 |
-| MaskDetectionConfidence | 0.00001 | 단일 Person 마스크 보정에서 착용 근거를 가장 많이 보존한 값. 근거 부족을 미착용으로 바꾸지 않음 |
+| NoWearDetectionConfidence | 0.05 | 미착용 클래스 실측 신뢰도가 0.01~0.23대로 낮음 |
+| HardhatDetectionConfidence | 0.01 | 착용 중에도 각도·조명에 따라 신뢰도가 크게 떨어지는 실측. 같은 사람의 NO-Hardhat과는 신뢰도 비교로 충돌 해소 |
+| MaskDetectionConfidence | 0.05 | 신뢰도 0에 가까운 점수로 마스크를 판정하지 않도록 NoWear와 같은 수준. 실측 검증 후 조정 |
 | NmsIouThreshold | 0.45 | 초기값 |
 | MinPersonHeightRatio / MaxPersonHeightRatio | 0.20 / 0.99 | 상체만 보이는 검사 허용(명세 0.40과 다름) |
 | MaxPersonWidthToHeightRatio | 1.5 | 상체 박스는 폭이 높이보다 넓을 수 있음 |
 | TargetAnalysisFrames / MinAnalysisFrames | 8 / 5 | 팀 튜닝으로 명세와 다름(명세 목표 12프레임) |
 | MaxAnalysisDurationSeconds | 7.0 | 팀 튜닝으로 명세와 다름(명세 최대 5초) |
 | MaxInferenceFps | 4 | PPE 896 + Person 640 두 모델 처리 시간에 맞춤(명세 6). 클라이언트 `MaxFrameSendFps`도 4 |
-| MinEvidenceFrames / MinEvidenceRatio | 3 / 0.25 | 착용·미착용 근거가 최소 3프레임일 때만 확정 |
-| DecisionRatio | 0.50 | 동률을 제외한 다수 쪽을 착용/미착용으로 확정 |
-
-### 판정 정책
-
-각 장비는 기본적으로 `착용` 또는 `미착용`으로 확정한다. `미확인`은 (1) 분석 프레임이 5개 미만이거나, (2) 착용·미착용 근거가 3개 미만이거나, (3) 양쪽 근거가 동률인 경우에만 사용한다. 즉 모델이 충분한 근거를 내지 못한 경우를 억지로 미착용으로 바꾸지 않는다.
-
-2026-09-14에 Construction Site Safety 100장 중 단일 Person으로 연결할 수 있었던 표본으로 검증 시 사용한 640 모델을 보정했다. 안전모는 착용 13장 중 13장을 `Hardhat=0.005`에서 보존했다. 마스크는 가장 낮은 임계값에서도 착용 20장 중 13장만 근거가 있었으므로, 나머지를 미착용으로 강제하지 않고 미확인으로 남긴다. 이 수치는 사람 단위 현장 검증을 대체하지 않으며, 발표 전 실제 카메라 표본으로 재검증해야 한다.
+| DecisionRatio | 0.70 | 문서 고정값 |
 
 ## 7. 테스트 실행
 

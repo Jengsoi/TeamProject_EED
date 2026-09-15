@@ -27,17 +27,20 @@ public sealed class SafetyVisionOptions
 
     public double DetectionConfidence { get; set; } = 0.40;
 
-    // "미착용"(NO-Hardhat/NO-Safety Vest) 클래스의 점수는 낮다. 단일 Person 보정 표본에서 0.005가
-    // 현재 결과 중 미착용 근거를 가장 많이 유지했다. 실제 점검은 여러 프레임의 다수결로 확정한다.
-    public double NoWearDetectionConfidence { get; set; } = 0.005;
+    // "미착용"(NO-Hardhat/NO-Safety Vest) 클래스는 실측 결과 신뢰도가 전반적으로 낮다(0.01~0.23대).
+    // 반면 실제로 착용 중일 때 이 클래스들의 점수는 0.0005 이하로 매우 깨끗하게 낮으므로(별도 검증 완료),
+    // 오탐 여유를 확보하면서 미착용 클래스만 더 낮은 임계값을 적용한다.
+    public double NoWearDetectionConfidence { get; set; } = 0.05;
 
     // Hardhat(착용) 클래스는 대부분 0.7~1.0대로 신뢰도가 높지만, 특정 프레임(각도/조명)에서는 안전모를
-    // 명백히 쓰고 있어도 0.0003~0.13까지 떨어지는 경우가 실측으로 확인됐다. 단일 Person 13장에서는
-    // 0.005가 착용 안전모를 모두 유지했고, 이 값보다 높이면 일부가 미확인이 됐다.
-    public double HardhatDetectionConfidence { get; set; } = 0.005;
-    // 이 PPE 모델의 Mask/NO-Mask 점수는 매우 작다. 단일 Person 38장 보정에서 0.00001이 실제 착용 근거를
-    // 가장 많이 유지하면서 착용자를 NO-Mask로 오판하지 않았다. 이 값만으로 근거가 생기지 않으면 미확인이다.
-    public double MaskDetectionConfidence { get; set; } = 0.00001;
+    // 명백히 쓰고 있어도 0.0003~0.13까지 떨어지는 경우가 실측으로 확인됐다. 반대로 안전모가 없을 때
+    // 이 클래스의 점수는 0.001 이하로 매우 깨끗하게 낮으므로(별도 검증 완료), NO-Hardhat/NO-Safety Vest와
+    // 같은 이유로 Hardhat도 SafetyVest와 별도로 더 낮은 임계값을 쓴다(SafetyVest는 0.40에서도 안정적이라
+    // DetectionConfidence를 그대로 쓴다).
+    public double HardhatDetectionConfidence { get; set; } = 0.01;
+    // 0에 가까운 점수로 마스크를 판정하지 않도록 NoWear와 같은 수준을 기본값으로 사용한다.
+    // 실측 검증 후 appsettings.json에서 조정할 수 있다.
+    public double MaskDetectionConfidence { get; set; } = 0.05;
 
     public double NmsIouThreshold { get; set; } = 0.45;
 
@@ -60,11 +63,9 @@ public sealed class SafetyVisionOptions
     public int MinAnalysisFrames { get; set; } = 5;
     public int MaxInferenceFps { get; set; } = 6;
 
-    // 미확인은 판별이 불가능한 경우로만 좁힌다(팀 결정, 05_AI모델명세.md의 0.50/0.70과 다름).
-    // 착용/미착용 근거가 max(MinEvidenceFrames, N*MinEvidenceRatio)개 이상이면 DecisionRatio 이상인 다수 쪽으로 판정한다.
     public int MinEvidenceFrames { get; set; } = 3;
-    public double MinEvidenceRatio { get; set; } = 0.25;
-    public double DecisionRatio { get; set; } = 0.50;
+    public double MinEvidenceRatio { get; set; } = 0.50;
+    public double DecisionRatio { get; set; } = 0.70;
 
     public double PersonHorizontalMarginRatio { get; set; } = 0.05;
     public double HeadTopMarginRatio { get; set; } = 0.15;
@@ -104,7 +105,7 @@ public sealed class SafetyVisionOptions
         if (MaxInferenceFps <= 0) yield return "MaxInferenceFps는 양수여야 합니다.";
         if (MinEvidenceFrames <= 0) yield return "MinEvidenceFrames는 양수여야 합니다.";
         if (MinEvidenceRatio is <= 0 or > 1) yield return "MinEvidenceRatio는 0 초과 1 이하여야 합니다.";
-        if (DecisionRatio is < 0.5 or > 1) yield return "DecisionRatio는 0.5 이상 1 이하여야 합니다.";
+        if (DecisionRatio is <= 0.5 or > 1) yield return "DecisionRatio는 0.5 초과 1 이하여야 합니다.";
         if (JpegQuality is < 1 or > 100) yield return "JpegQuality는 1~100 사이여야 합니다.";
         if (!IPAddress.TryParse(ListenAddress, out _)) yield return "ListenAddress는 유효한 IP 주소여야 합니다.";
         if (ListenPort is <= 0 or > 65535) yield return "ListenPort는 1~65535 사이여야 합니다.";
